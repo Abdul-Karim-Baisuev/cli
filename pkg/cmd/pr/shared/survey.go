@@ -1,17 +1,18 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/git"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/githubtemplate"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
-	"github.com/cli/cli/pkg/surveyext"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/surveyext"
 )
 
 type Action int
@@ -22,19 +23,43 @@ const (
 	CancelAction
 	MetadataAction
 	EditCommitMessageAction
+	EditCommitSubjectAction
+	SubmitDraftAction
 
 	noMilestone = "(none)"
+
+	submitLabel      = "Submit"
+	submitDraftLabel = "Submit as draft"
+	previewLabel     = "Continue in browser"
+	metadataLabel    = "Add metadata"
+	cancelLabel      = "Cancel"
 )
 
-func ConfirmSubmission(allowPreview bool, allowMetadata bool) (Action, error) {
-	const (
-		submitLabel   = "Submit"
-		previewLabel  = "Continue in browser"
-		metadataLabel = "Add metadata"
-		cancelLabel   = "Cancel"
-	)
+type Prompt interface {
+	Input(prompt string, defaultValue string) (string, error)
+	Select(prompt string, defaultValue string, options []string) (int, error)
+	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+	Confirm(prompt string, defaultValue bool) (bool, error)
+	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+}
 
-	options := []string{submitLabel}
+func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+	return confirmSubmission(p, allowPreview, allowMetadata, false, false)
+}
+
+func ConfirmPRSubmission(p Prompt, allowPreview, allowMetadata, isDraft bool) (Action, error) {
+	return confirmSubmission(p, allowPreview, allowMetadata, true, isDraft)
+}
+
+func confirmSubmission(p Prompt, allowPreview, allowMetadata, allowDraft, isDraft bool) (Action, error) {
+	var options []string
+	if !isDraft {
+		options = append(options, submitLabel)
+	}
+	if allowDraft {
+		options = append(options, submitDraftLabel)
+	}
 	if allowPreview {
 		options = append(options, previewLabel)
 	}
@@ -43,27 +68,16 @@ func ConfirmSubmission(allowPreview bool, allowMetadata bool) (Action, error) {
 	}
 	options = append(options, cancelLabel)
 
-	confirmAnswers := struct {
-		Confirmation int
-	}{}
-	confirmQs := []*survey.Question{
-		{
-			Name: "confirmation",
-			Prompt: &survey.Select{
-				Message: "What's next?",
-				Options: options,
-			},
-		},
-	}
-
-	err := prompt.SurveyAsk(confirmQs, &confirmAnswers)
+	result, err := p.Select("What's next?", "", options)
 	if err != nil {
 		return -1, fmt.Errorf("could not prompt: %w", err)
 	}
 
-	switch options[confirmAnswers.Confirmation] {
+	switch options[result] {
 	case submitLabel:
 		return SubmitAction, nil
+	case submitDraftLabel:
+		return SubmitDraftAction, nil
 	case previewLabel:
 		return PreviewAction, nil
 	case metadataLabel:
@@ -71,11 +85,11 @@ func ConfirmSubmission(allowPreview bool, allowMetadata bool) (Action, error) {
 	case cancelLabel:
 		return CancelAction, nil
 	default:
-		return -1, fmt.Errorf("invalid index: %d", confirmAnswers.Confirmation)
+		return -1, fmt.Errorf("invalid index: %d", result)
 	}
 }
 
-func BodySurvey(state *IssueMetadataState, templateContent, editorCommand string) error {
+func BodySurvey(p Prompt, state *IssueMetadataState, templateContent string) error {
 	if templateContent != "" {
 		if state.Body != "" {
 			// prevent excessive newlines between default body and template
@@ -85,60 +99,38 @@ func BodySurvey(state *IssueMetadataState, templateContent, editorCommand string
 		state.Body += templateContent
 	}
 
-	preBody := state.Body
-
-	// TODO should just be an AskOne but ran into problems with the stubber
-	qs := []*survey.Question{
-		{
-			Name: "Body",
-			Prompt: &surveyext.GhEditor{
-				BlankAllowed:  true,
-				EditorCommand: editorCommand,
-				Editor: &survey.Editor{
-					Message:       "Body",
-					FileName:      "*.md",
-					Default:       state.Body,
-					HideDefault:   true,
-					AppendDefault: true,
-				},
-			},
-		},
-	}
-
-	err := prompt.SurveyAsk(qs, state)
+	result, err := p.MarkdownEditor("Body", state.Body, true)
 	if err != nil {
 		return err
 	}
 
-	if state.Body != "" && preBody != state.Body {
+	if state.Body != result {
 		state.MarkDirty()
 	}
+
+	state.Body = result
 
 	return nil
 }
 
-func TitleSurvey(state *IssueMetadataState) error {
-	preTitle := state.Title
-
-	// TODO should just be an AskOne but ran into problems with the stubber
-	qs := []*survey.Question{
-		{
-			Name: "Title",
-			Prompt: &survey.Input{
-				Message: "Title",
-				Default: state.Title,
-			},
-		},
+func TitleSurvey(p Prompt, io *iostreams.IOStreams, state *IssueMetadataState) error {
+	var err error
+	result := ""
+	for result == "" {
+		result, err = p.Input("Title (required)", state.Title)
+		if err != nil {
+			return err
+		}
+		if result == "" {
+			fmt.Fprintf(io.ErrOut, "%s Title cannot be blank\n", io.ColorScheme().FailureIcon())
+		}
 	}
 
-	err := prompt.SurveyAsk(qs, state)
-	if err != nil {
-		return err
-	}
-
-	if preTitle != state.Title {
+	if result != state.Title {
 		state.MarkDirty()
 	}
+
+	state.Title = result
 
 	return nil
 }
@@ -162,7 +154,7 @@ type RepoMetadataFetcher interface {
 	RepoMetadataFetch(api.RepoMetadataInput) (*api.RepoMetadataResult, error)
 }
 
-func MetadataSurvey(io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher RepoMetadataFetcher, state *IssueMetadataState) error {
+func MetadataSurvey(p Prompt, io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher RepoMetadataFetcher, state *IssueMetadataState, projectsV1Support gh.ProjectsV1Support, reviewerSearchFunc func(string) prompter.MultiSelectSearchResult, assigneeSearchFunc func(string) prompter.MultiSelectSearchResult) error {
 	isChosen := func(m string) bool {
 		for _, c := range state.Metadata {
 			if m == c {
@@ -180,105 +172,174 @@ func MetadataSurvey(io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher 
 	}
 	extraFieldsOptions = append(extraFieldsOptions, "Assignees", "Labels", "Projects", "Milestone")
 
-	err := prompt.SurveyAsk([]*survey.Question{
-		{
-			Name: "metadata",
-			Prompt: &survey.MultiSelect{
-				Message: "What would you like to add?",
-				Options: extraFieldsOptions,
-			},
-		},
-	}, state)
+	selected, err := p.MultiSelect("What would you like to add?", nil, extraFieldsOptions)
 	if err != nil {
-		return fmt.Errorf("could not prompt: %w", err)
+		return err
+	}
+	for _, i := range selected {
+		state.Metadata = append(state.Metadata, extraFieldsOptions[i])
 	}
 
+	// Retrieve and process data for survey prompts based on the extra fields selected.
+	// When search-based selection is available, skip the expensive assignable-users
+	// and teams fetch since they are found dynamically via the search function.
+	// TODO ApiActorsSupported
+	useReviewerSearch := state.ApiActorsSupported && reviewerSearchFunc != nil
+	useAssigneeSearch := state.ApiActorsSupported && assigneeSearchFunc != nil
 	metadataInput := api.RepoMetadataInput{
-		Reviewers:  isChosen("Reviewers"),
-		Assignees:  isChosen("Assignees"),
-		Labels:     isChosen("Labels"),
-		Projects:   isChosen("Projects"),
-		Milestones: isChosen("Milestone"),
+		Reviewers:          isChosen("Reviewers") && !useReviewerSearch,
+		TeamReviewers:      isChosen("Reviewers") && !useReviewerSearch,
+		Assignees:          isChosen("Assignees") && !useAssigneeSearch,
+		ApiActorsSupported: state.ApiActorsSupported,
+		Labels:             isChosen("Labels"),
+		ProjectsV1:         isChosen("Projects") && projectsV1Support == gh.ProjectsV1Supported,
+		ProjectsV2:         isChosen("Projects"),
+		Milestones:         isChosen("Milestone"),
 	}
 	metadataResult, err := fetcher.RepoMetadataFetch(metadataInput)
 	if err != nil {
 		return fmt.Errorf("error fetching metadata options: %w", err)
 	}
 
-	var users []string
-	for _, u := range metadataResult.AssignableUsers {
-		users = append(users, u.Login)
+	var reviewers []string
+	if !useReviewerSearch {
+		for _, u := range metadataResult.AssignableUsers {
+			if u.Login() != metadataResult.CurrentLogin {
+				reviewers = append(reviewers, u.DisplayName())
+			}
+		}
+		for _, t := range metadataResult.Teams {
+			reviewers = append(reviewers, fmt.Sprintf("%s/%s", baseRepo.RepoOwner(), t.Slug))
+		}
 	}
-	var teams []string
-	for _, t := range metadataResult.Teams {
-		teams = append(teams, fmt.Sprintf("%s/%s", baseRepo.RepoOwner(), t.Slug))
+
+	// Populate the list of selectable assignees and their default selections.
+	// When search-based selection is available, skip building the static list.
+	var assignees []string
+	var assigneesDefault []string
+	if !useAssigneeSearch {
+		// TODO ApiActorsSupported
+		if state.ApiActorsSupported {
+			for _, u := range metadataResult.AssignableActors {
+				assignees = append(assignees, u.DisplayName())
+
+				if slices.Contains(state.Assignees, u.Login()) {
+					assigneesDefault = append(assigneesDefault, u.DisplayName())
+				}
+			}
+		} else {
+			for _, u := range metadataResult.AssignableUsers {
+				assignees = append(assignees, u.DisplayName())
+
+				if slices.Contains(state.Assignees, u.Login()) {
+					assigneesDefault = append(assigneesDefault, u.DisplayName())
+				}
+			}
+		}
 	}
 	var labels []string
 	for _, l := range metadataResult.Labels {
 		labels = append(labels, l.Name)
 	}
 	var projects []string
-	for _, l := range metadataResult.Projects {
-		projects = append(projects, l.Name)
+	for _, p := range metadataResult.Projects {
+		projects = append(projects, p.Name)
+	}
+	for _, p := range metadataResult.ProjectsV2 {
+		projects = append(projects, p.Title)
 	}
 	milestones := []string{noMilestone}
 	for _, m := range metadataResult.Milestones {
 		milestones = append(milestones, m.Title)
 	}
 
-	var mqs []*survey.Question
+	// Prompt user for additional metadata based on selected fields
+	values := struct {
+		Reviewers []string
+		Assignees []string
+		Labels    []string
+		Projects  []string
+		Milestone string
+	}{}
+
 	if isChosen("Reviewers") {
-		if len(users) > 0 || len(teams) > 0 {
-			mqs = append(mqs, &survey.Question{
-				Name: "reviewers",
-				Prompt: &survey.MultiSelect{
-					Message: "Reviewers",
-					Options: append(users, teams...),
-					Default: state.Reviewers,
-				},
-			})
+		if useReviewerSearch {
+			selectedReviewers, err := p.MultiSelectWithSearch(
+				"Reviewers",
+				"Search reviewers",
+				state.Reviewers,
+				[]string{},
+				reviewerSearchFunc)
+			if err != nil {
+				return err
+			}
+			values.Reviewers = selectedReviewers
+		} else if len(reviewers) > 0 {
+			// TODO ApiActorsSupported
+			// The static MultiSelect path can be removed once GHES supports
+			// requestReviewsByLogin and search-based selection is always used.
+			selected, err := p.MultiSelect("Reviewers", state.Reviewers, reviewers)
+			if err != nil {
+				return err
+			}
+			for _, i := range selected {
+				values.Reviewers = append(values.Reviewers, reviewers[i])
+			}
 		} else {
 			fmt.Fprintln(io.ErrOut, "warning: no available reviewers")
 		}
 	}
 	if isChosen("Assignees") {
-		if len(users) > 0 {
-			mqs = append(mqs, &survey.Question{
-				Name: "assignees",
-				Prompt: &survey.MultiSelect{
-					Message: "Assignees",
-					Options: users,
-					Default: state.Assignees,
-				},
-			})
+		if useAssigneeSearch {
+			selectedAssignees, err := p.MultiSelectWithSearch(
+				"Assignees",
+				"Search assignees",
+				state.Assignees,
+				[]string{},
+				assigneeSearchFunc)
+			if err != nil {
+				return err
+			}
+			values.Assignees = selectedAssignees
+		} else if len(assignees) > 0 {
+			selected, err := p.MultiSelect("Assignees", assigneesDefault, assignees)
+			if err != nil {
+				return err
+			}
+			for _, i := range selected {
+				// TODO ApiActorsSupported
+				if state.ApiActorsSupported {
+					values.Assignees = append(values.Assignees, metadataResult.AssignableActors[i].Login())
+				} else {
+					values.Assignees = append(values.Assignees, metadataResult.AssignableUsers[i].Login())
+				}
+			}
 		} else {
 			fmt.Fprintln(io.ErrOut, "warning: no assignable users")
 		}
 	}
 	if isChosen("Labels") {
 		if len(labels) > 0 {
-			mqs = append(mqs, &survey.Question{
-				Name: "labels",
-				Prompt: &survey.MultiSelect{
-					Message: "Labels",
-					Options: labels,
-					Default: state.Labels,
-				},
-			})
+			selected, err := p.MultiSelect("Labels", state.Labels, labels)
+			if err != nil {
+				return err
+			}
+			for _, i := range selected {
+				values.Labels = append(values.Labels, labels[i])
+			}
 		} else {
 			fmt.Fprintln(io.ErrOut, "warning: no labels in the repository")
 		}
 	}
 	if isChosen("Projects") {
 		if len(projects) > 0 {
-			mqs = append(mqs, &survey.Question{
-				Name: "projects",
-				Prompt: &survey.MultiSelect{
-					Message: "Projects",
-					Options: projects,
-					Default: state.Projects,
-				},
-			})
+			selected, err := p.MultiSelect("Projects", state.ProjectTitles, projects)
+			if err != nil {
+				return err
+			}
+			for _, i := range selected {
+				values.Projects = append(values.Projects, projects[i])
+			}
 		} else {
 			fmt.Fprintln(io.ErrOut, "warning: no projects to choose from")
 		}
@@ -288,35 +349,27 @@ func MetadataSurvey(io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher 
 			var milestoneDefault string
 			if len(state.Milestones) > 0 {
 				milestoneDefault = state.Milestones[0]
+			} else {
+				milestoneDefault = milestones[1]
 			}
-			mqs = append(mqs, &survey.Question{
-				Name: "milestone",
-				Prompt: &survey.Select{
-					Message: "Milestone",
-					Options: milestones,
-					Default: milestoneDefault,
-				},
-			})
+			selected, err := p.Select("Milestone", milestoneDefault, milestones)
+			if err != nil {
+				return err
+			}
+			values.Milestone = milestones[selected]
 		} else {
 			fmt.Fprintln(io.ErrOut, "warning: no milestones in the repository")
 		}
 	}
 
-	values := struct {
-		Reviewers []string
-		Assignees []string
-		Labels    []string
-		Projects  []string
-		Milestone string
-	}{}
-
-	err = prompt.SurveyAsk(mqs, &values, survey.WithKeepFilter(true))
-	if err != nil {
-		return fmt.Errorf("could not prompt: %w", err)
-	}
-
+	// Update issue / pull request metadata state
 	if isChosen("Reviewers") {
-		state.Reviewers = values.Reviewers
+		var logins []string
+		for _, r := range values.Reviewers {
+			// Extract user login from display name
+			logins = append(logins, (strings.Split(r, " "))[0])
+		}
+		state.Reviewers = logins
 	}
 	if isChosen("Assignees") {
 		state.Assignees = values.Assignees
@@ -325,7 +378,7 @@ func MetadataSurvey(io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher 
 		state.Labels = values.Labels
 	}
 	if isChosen("Projects") {
-		state.Projects = values.Projects
+		state.ProjectTitles = values.Projects
 	}
 	if isChosen("Milestone") {
 		if values.Milestone != "" && values.Milestone != noMilestone {
@@ -338,17 +391,62 @@ func MetadataSurvey(io *iostreams.IOStreams, baseRepo ghrepo.Interface, fetcher 
 	return nil
 }
 
-func FindTemplates(dir, path string) ([]string, string) {
-	if dir == "" {
-		rootDir, err := git.ToplevelDir()
+type Editor interface {
+	Edit(filename, initialValue string) (string, error)
+}
+
+type UserEditor struct {
+	IO     *iostreams.IOStreams
+	Config func() (gh.Config, error)
+}
+
+func (e *UserEditor) Edit(filename, initialValue string) (string, error) {
+	editorCommand, err := cmdutil.DetermineEditor(e.Config)
+	if err != nil {
+		return "", err
+	}
+	return surveyext.Edit(editorCommand, filename, initialValue, e.IO.In, e.IO.Out, e.IO.ErrOut)
+}
+
+const editorHintMarker = "------------------------ >8 ------------------------"
+const editorHint = `
+Please Enter the title on the first line and the body on subsequent lines.
+Lines below dotted lines will be ignored, and an empty title aborts the creation process.`
+
+func TitledEditSurvey(editor Editor) func(string, string) (string, string, error) {
+	return func(initialTitle, initialBody string) (string, string, error) {
+		initialValue := strings.Join([]string{initialTitle, initialBody, editorHintMarker, editorHint}, "\n")
+		titleAndBody, err := editor.Edit("*.md", initialValue)
 		if err != nil {
-			return []string{}, ""
+			return "", "", err
 		}
-		dir = rootDir
+
+		titleAndBody = strings.ReplaceAll(titleAndBody, "\r\n", "\n")
+		titleAndBody, _, _ = strings.Cut(titleAndBody, editorHintMarker)
+		title, body, _ := strings.Cut(titleAndBody, "\n")
+		return title, strings.TrimSuffix(body, "\n"), nil
+	}
+}
+
+func InitEditorMode(f *cmdutil.Factory, editorMode bool, webMode bool, canPrompt bool) (bool, error) {
+	if err := cmdutil.MutuallyExclusive(
+		"specify only one of `--editor` or `--web`",
+		editorMode,
+		webMode,
+	); err != nil {
+		return false, err
 	}
 
-	templateFiles := githubtemplate.FindNonLegacy(dir, path)
-	legacyTemplate := githubtemplate.FindLegacy(dir, path)
+	config, err := f.Config()
+	if err != nil {
+		return false, err
+	}
 
-	return templateFiles, legacyTemplate
+	editorMode = !webMode && (editorMode || config.PreferEditorPrompt("").Value == "enabled")
+
+	if editorMode && !canPrompt {
+		return false, errors.New("--editor or enabled prefer_editor_prompt configuration are not supported in non-tty mode")
+	}
+
+	return editorMode, nil
 }

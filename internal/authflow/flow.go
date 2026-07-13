@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strings"
+	"net/url"
 
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/pkg/browser"
-	"github.com/cli/cli/pkg/iostreams"
+	"github.com/atotto/clipboard"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/browser"
+	"github.com/cli/cli/v2/internal/ghinstance"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/cli/oauth"
+
+	ghauth "github.com/cli/go-gh/v2/pkg/auth"
 )
 
 var (
@@ -22,90 +24,66 @@ var (
 	oauthClientSecret = "34ddeff2b558a23d38fba8a6de74f086ede1cc0b"
 )
 
-type iconfig interface {
-	Set(string, string, string) error
-	Write() error
-}
-
-func AuthFlowWithConfig(cfg iconfig, IO *iostreams.IOStreams, hostname, notice string, additionalScopes []string) (string, error) {
-	// TODO this probably shouldn't live in this package. It should probably be in a new package that
-	// depends on both iostreams and config.
-	stderr := IO.ErrOut
-	cs := IO.ColorScheme()
-
-	token, userLogin, err := authFlow(hostname, IO, notice, additionalScopes)
-	if err != nil {
-		return "", err
-	}
-
-	err = cfg.Set(hostname, "user", userLogin)
-	if err != nil {
-		return "", err
-	}
-	err = cfg.Set(hostname, "oauth_token", token)
-	if err != nil {
-		return "", err
-	}
-
-	err = cfg.Write()
-	if err != nil {
-		return "", err
-	}
-
-	fmt.Fprintf(stderr, "%s Authentication complete. %s to continue...\n",
-		cs.SuccessIcon(), cs.Bold("Press Enter"))
-	_ = waitForEnter(IO.In)
-
-	return token, nil
-}
-
-func authFlow(oauthHost string, IO *iostreams.IOStreams, notice string, additionalScopes []string) (string, string, error) {
+// AuthFlow initiates an OAuth device or web application flow to acquire a
+// token. The provided HTTP client should be a plain client that does not set
+// auth or other headers.
+func AuthFlow(httpClient *http.Client, oauthHost string, IO *iostreams.IOStreams, notice string, additionalScopes []string, isInteractive bool, b browser.Browser, isCopyToClipboard bool) (string, string, error) {
 	w := IO.ErrOut
 	cs := IO.ColorScheme()
-
-	httpClient := http.DefaultClient
-	if envDebug := os.Getenv("DEBUG"); envDebug != "" {
-		logTraffic := strings.Contains(envDebug, "api") || strings.Contains(envDebug, "oauth")
-		httpClient.Transport = api.VerboseLog(IO.ErrOut, logTraffic, IO.ColorEnabled())(httpClient.Transport)
-	}
 
 	minimumScopes := []string{"repo", "read:org", "gist"}
 	scopes := append(minimumScopes, additionalScopes...)
 
-	callbackURI := "http://127.0.0.1/callback"
-	if ghinstance.IsEnterprise(oauthHost) {
-		// the OAuth app on Enterprise hosts is still registered with a legacy callback URL
-		// see https://github.com/cli/cli/pull/222, https://github.com/cli/cli/pull/650
-		callbackURI = "http://localhost/"
+	host, err := oauth.NewGitHubHost(ghinstance.HostPrefix(oauthHost))
+	if err != nil {
+		return "", "", err
 	}
 
 	flow := &oauth.Flow{
-		Hostname:     oauthHost,
+		Host:         host,
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
-		CallbackURI:  callbackURI,
+		CallbackURI:  getCallbackURI(oauthHost),
 		Scopes:       scopes,
 		DisplayCode: func(code, verificationURL string) error {
+			if isCopyToClipboard {
+				err := clipboard.WriteAll(code)
+				if err == nil {
+					fmt.Fprintf(w, "%s One-time code (%s) copied to clipboard\n", cs.Yellow("!"), cs.Bold(code))
+					return nil
+				}
+				fmt.Fprintf(w, "%s Failed to copy one-time code to clipboard\n", cs.Red("!"))
+				fmt.Fprintf(w, "  %s\n", err)
+			}
 			fmt.Fprintf(w, "%s First copy your one-time code: %s\n", cs.Yellow("!"), cs.Bold(code))
 			return nil
 		},
-		BrowseURL: func(url string) error {
-			fmt.Fprintf(w, "- %s to open %s in your browser... ", cs.Bold("Press Enter"), oauthHost)
-			_ = waitForEnter(IO.In)
-
-			browseCmd, err := browser.Command(url)
-			if err != nil {
+		BrowseURL: func(authURL string) error {
+			if u, err := url.Parse(authURL); err == nil {
+				if u.Scheme != "http" && u.Scheme != "https" {
+					return fmt.Errorf("invalid URL: %s", authURL)
+				}
+			} else {
 				return err
 			}
-			if err := browseCmd.Run(); err != nil {
-				fmt.Fprintf(w, "%s Failed opening a web browser at %s\n", cs.Red("!"), url)
+
+			if !isInteractive {
+				fmt.Fprintf(w, "%s to continue in your web browser: %s\n", cs.Bold("Open this URL"), authURL)
+				return nil
+			}
+
+			fmt.Fprintf(w, "%s to open %s in your browser... ", cs.Bold("Press Enter"), authURL)
+			_ = waitForEnter(IO.In)
+
+			if err := b.Browse(authURL); err != nil {
+				fmt.Fprintf(w, "%s Failed opening a web browser at %s\n", cs.Red("!"), authURL)
 				fmt.Fprintf(w, "  %s\n", err)
 				fmt.Fprint(w, "  Please try entering the URL in your browser manually\n")
 			}
 			return nil
 		},
 		WriteSuccessHTML: func(w io.Writer) {
-			fmt.Fprintln(w, oauthSuccessPage)
+			fmt.Fprint(w, oauthSuccessPage)
 		},
 		HTTPClient: httpClient,
 		Stdin:      IO.In,
@@ -119,7 +97,7 @@ func authFlow(oauthHost string, IO *iostreams.IOStreams, notice string, addition
 		return "", "", err
 	}
 
-	userLogin, err := getViewer(oauthHost, token.Token)
+	userLogin, err := getViewer(httpClient, oauthHost, token.Token)
 	if err != nil {
 		return "", "", err
 	}
@@ -127,9 +105,28 @@ func authFlow(oauthHost string, IO *iostreams.IOStreams, notice string, addition
 	return token.Token, userLogin, nil
 }
 
-func getViewer(hostname, token string) (string, error) {
-	http := api.NewClient(api.AddHeader("Authorization", fmt.Sprintf("token %s", token)))
-	return api.CurrentLoginName(http, hostname)
+func getCallbackURI(oauthHost string) string {
+	callbackURI := "http://127.0.0.1/callback"
+	if ghauth.IsEnterprise(oauthHost) {
+		// the OAuth app on Enterprise hosts is still registered with a legacy callback URL
+		// see https://github.com/cli/cli/pull/222, https://github.com/cli/cli/pull/650
+		callbackURI = "http://localhost/"
+	}
+	return callbackURI
+}
+
+type cfg struct {
+	token string
+}
+
+func (c cfg) ActiveToken(hostname string) (string, string) {
+	return c.token, "oauth_token"
+}
+
+func getViewer(httpClient *http.Client, hostname, token string) (string, error) {
+	authedClient := *httpClient
+	authedClient.Transport = api.AddAuthTokenHeader(httpClient.Transport, cfg{token: token})
+	return api.CurrentLoginName(api.NewClientFromHTTP(&authedClient), hostname)
 }
 
 func waitForEnter(r io.Reader) error {

@@ -2,26 +2,9 @@ package httpmock
 
 import (
 	"fmt"
-	"net/http"
-	"os"
 )
 
 // TODO: clean up methods in this file when there are no more callers
-
-func (r *Registry) StubWithFixturePath(status int, fixturePath string) func() {
-	fixtureFile, err := os.Open(fixturePath)
-	r.Register(MatchAny, func(req *http.Request) (*http.Response, error) {
-		if err != nil {
-			return nil, err
-		}
-		return httpResponse(200, req, fixtureFile), nil
-	})
-	return func() {
-		if err == nil {
-			fixtureFile.Close()
-		}
-	}
-}
 
 func (r *Registry) StubRepoInfoResponse(owner, repo, branch string) {
 	r.Register(
@@ -37,6 +20,20 @@ func (r *Registry) StubRepoInfoResponse(owner, repo, branch string) {
 			"viewerPermission": "WRITE"
 		} } }
 		`, repo, owner, branch)))
+}
+
+func (r *Registry) StubIssueRepoInfoResponse(owner, repo string) {
+	r.Register(
+		GraphQL(`query IssueRepositoryInfo\b`),
+		StringResponse(fmt.Sprintf(`
+		{ "data": { "repository": {
+			"id": "REPOID",
+			"name": "%s",
+			"owner": {"login": "%s"},
+			"hasIssuesEnabled": true,
+			"viewerPermission": "WRITE"
+		} } }
+		`, repo, owner)))
 }
 
 func (r *Registry) StubRepoResponse(owner, repo string) {

@@ -2,58 +2,39 @@ package markdown
 
 import (
 	"os"
-	"strings"
+	"strconv"
 
 	"github.com/charmbracelet/glamour"
+	ghMarkdown "github.com/cli/go-gh/v2/pkg/markdown"
 )
 
-func Render(text, style string, baseURL string) (string, error) {
-	// Glamour rendering preserves carriage return characters in code blocks, but
-	// we need to ensure that no such characters are present in the output.
-	text = strings.ReplaceAll(text, "\r\n", "\n")
+func WithoutIndentation() glamour.TermRendererOption {
+	return ghMarkdown.WithoutIndentation()
+}
 
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStylePath(style),
-		glamour.WithBaseURL(baseURL),
-		// glamour.WithWordWrap(80), // TODO: make configurable
-	)
+// WithWrap is a rendering option that set the character limit for soft
+// wrapping the markdown rendering. There is a max limit of 120 characters,
+// unless the user overrides with an environment variable.
+// If 0 is passed then wrapping is disabled.
+func WithWrap(w int) glamour.TermRendererOption {
+	width, err := strconv.Atoi(os.Getenv("GH_MDWIDTH"))
 	if err != nil {
-		return "", err
+		width = 120
 	}
-
-	return tr.Render(text)
+	if w > width {
+		w = width
+	}
+	return ghMarkdown.WithWrap(w)
 }
 
-func RenderWrap(text, style string, wrap int) (string, error) {
-	// Glamour rendering preserves carriage return characters in code blocks, but
-	// we need to ensure that no such characters are present in the output.
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStylePath(style),
-		// glamour.WithBaseURL(""),  // TODO: make configurable
-		glamour.WithWordWrap(wrap),
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return tr.Render(text)
+func WithTheme(theme string) glamour.TermRendererOption {
+	return ghMarkdown.WithTheme(theme)
 }
 
-func GetStyle(defaultStyle string) string {
-	style := fromEnv()
-	if style != "" && style != "auto" {
-		return style
-	}
-
-	if defaultStyle == "light" || defaultStyle == "dark" {
-		return defaultStyle
-	}
-
-	return "notty"
+func WithBaseURL(u string) glamour.TermRendererOption {
+	return ghMarkdown.WithBaseURL(u)
 }
 
-var fromEnv = func() string {
-	return os.Getenv("GLAMOUR_STYLE")
+func Render(text string, opts ...glamour.TermRendererOption) (string, error) {
+	return ghMarkdown.Render(text, opts...)
 }

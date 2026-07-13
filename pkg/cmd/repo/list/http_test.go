@@ -2,12 +2,12 @@ package list
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"testing"
 
-	"github.com/cli/cli/pkg/httpmock"
+	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +23,7 @@ func Test_listReposWithLanguage(t *testing.T) {
 	reg.Register(
 		httpmock.GraphQL(`query RepositoryListSearch\b`),
 		func(req *http.Request) (*http.Response, error) {
-			jsonData, err := ioutil.ReadAll(req.Body)
+			jsonData, err := io.ReadAll(req.Body)
 			if err != nil {
 				return nil, err
 			}
@@ -57,7 +57,7 @@ func Test_listReposWithLanguage(t *testing.T) {
 	assert.Equal(t, "octocat/hello-world", res.Repositories[0].NameWithOwner)
 
 	assert.Equal(t, float64(10), searchData.Variables["perPage"])
-	assert.Equal(t, `sort:updated-desc user:@me fork:true language:"go"`, searchData.Variables["query"])
+	assert.Equal(t, `sort:updated-desc fork:true language:go user:@me`, searchData.Variables["query"])
 }
 
 func Test_searchQuery(t *testing.T) {
@@ -72,14 +72,14 @@ func Test_searchQuery(t *testing.T) {
 	}{
 		{
 			name: "blank",
-			want: "sort:updated-desc user:@me fork:true",
+			want: "sort:updated-desc fork:true user:@me",
 		},
 		{
 			name: "in org",
 			args: args{
 				owner: "cli",
 			},
-			want: "sort:updated-desc user:cli fork:true",
+			want: "sort:updated-desc fork:true user:cli",
 		},
 		{
 			name: "only public",
@@ -89,7 +89,7 @@ func Test_searchQuery(t *testing.T) {
 					Visibility: "public",
 				},
 			},
-			want: "sort:updated-desc user:@me fork:true is:public",
+			want: "sort:updated-desc fork:true is:public user:@me",
 		},
 		{
 			name: "only private",
@@ -99,7 +99,7 @@ func Test_searchQuery(t *testing.T) {
 					Visibility: "private",
 				},
 			},
-			want: "sort:updated-desc user:@me fork:true is:private",
+			want: "sort:updated-desc fork:true is:private user:@me",
 		},
 		{
 			name: "only forks",
@@ -109,7 +109,7 @@ func Test_searchQuery(t *testing.T) {
 					Fork: true,
 				},
 			},
-			want: "sort:updated-desc user:@me fork:only",
+			want: "sort:updated-desc fork:only user:@me",
 		},
 		{
 			name: "no forks",
@@ -119,7 +119,7 @@ func Test_searchQuery(t *testing.T) {
 					Source: true,
 				},
 			},
-			want: "sort:updated-desc user:@me fork:false",
+			want: "sort:updated-desc fork:false user:@me",
 		},
 		{
 			name: "with language",
@@ -129,7 +129,7 @@ func Test_searchQuery(t *testing.T) {
 					Language: "ruby",
 				},
 			},
-			want: "sort:updated-desc user:@me fork:true language:\"ruby\"",
+			want: `sort:updated-desc fork:true language:ruby user:@me`,
 		},
 		{
 			name: "only archived",
@@ -139,7 +139,7 @@ func Test_searchQuery(t *testing.T) {
 					Archived: true,
 				},
 			},
-			want: "sort:updated-desc user:@me fork:true archived:true",
+			want: "sort:updated-desc archived:true fork:true user:@me",
 		},
 		{
 			name: "only non-archived",
@@ -149,7 +149,7 @@ func Test_searchQuery(t *testing.T) {
 					NonArchived: true,
 				},
 			},
-			want: "sort:updated-desc user:@me fork:true archived:false",
+			want: "sort:updated-desc archived:false fork:true user:@me",
 		},
 	}
 	for _, tt := range tests {

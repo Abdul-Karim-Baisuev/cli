@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/markdown"
-	"github.com/cli/cli/utils"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/text"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/markdown"
 )
 
 type Comment interface {
+	Identifier() string
 	AuthorLogin() string
 	Association() string
 	Content() string
@@ -61,7 +62,7 @@ func CommentList(io *iostreams.IOStreams, comments api.Comments, reviews api.Pul
 	hiddenCount := totalCount - retrievedCount
 
 	if preview && hiddenCount > 0 {
-		fmt.Fprint(&b, cs.Gray(fmt.Sprintf("———————— Not showing %s ————————", utils.Pluralize(hiddenCount, "comment"))))
+		fmt.Fprint(&b, cs.Muted(fmt.Sprintf("———————— Not showing %s ————————", text.Pluralize(hiddenCount, "comment"))))
 		fmt.Fprintf(&b, "\n\n\n")
 	}
 
@@ -78,7 +79,7 @@ func CommentList(io *iostreams.IOStreams, comments api.Comments, reviews api.Pul
 	}
 
 	if preview && hiddenCount > 0 {
-		fmt.Fprint(&b, cs.Gray("Use --comments to view the full conversation"))
+		fmt.Fprint(&b, cs.Muted("Use --comments to view the full conversation"))
 		fmt.Fprintln(&b)
 	}
 
@@ -99,9 +100,15 @@ func formatComment(io *iostreams.IOStreams, comment Comment, newest bool) (strin
 		fmt.Fprint(&b, formatCommentStatus(cs, comment.Status()))
 	}
 	if comment.Association() != "NONE" {
+<<<<<<< HEAD
 		fmt.Fprint(&b, cs.Boldf(" (%s)", strings.Title(strings.ToLower(comment.Association()))))
 	}
 	fmt.Fprint(&b, cs.Boldf(" • %s", utils.FuzzyAgoAbbr(time.Now(), comment.Created())))
+=======
+		fmt.Fprint(&b, cs.Boldf(" (%s)", text.Title(comment.Association())))
+	}
+	fmt.Fprint(&b, cs.Boldf(" • %s", text.FuzzyAgoAbbr(time.Now(), comment.Created())))
+>>>>>>> origin/trunk
 	if comment.IsEdited() {
 		fmt.Fprint(&b, cs.Bold(" • Edited"))
 	}
@@ -121,10 +128,11 @@ func formatComment(io *iostreams.IOStreams, comment Comment, newest bool) (strin
 	var md string
 	var err error
 	if comment.Content() == "" {
-		md = fmt.Sprintf("\n  %s\n\n", cs.Gray("No body provided"))
+		md = fmt.Sprintf("\n  %s\n\n", cs.Muted("No body provided"))
 	} else {
-		style := markdown.GetStyle(io.TerminalTheme())
-		md, err = markdown.Render(comment.Content(), style, "")
+		md, err = markdown.Render(comment.Content(),
+			markdown.WithTheme(io.TerminalTheme()),
+			markdown.WithWrap(io.TerminalWidth()))
 		if err != nil {
 			return "", err
 		}
@@ -133,7 +141,7 @@ func formatComment(io *iostreams.IOStreams, comment Comment, newest bool) (strin
 
 	// Footer
 	if comment.Link() != "" {
-		fmt.Fprintf(&b, cs.Gray("View the full review: %s\n\n"), comment.Link())
+		fmt.Fprintf(&b, cs.Muted("View the full review: %s\n\n"), comment.Link())
 	}
 
 	return b.String(), nil
@@ -196,7 +204,7 @@ func formatHiddenComment(comment Comment) string {
 	var b strings.Builder
 	fmt.Fprint(&b, comment.AuthorLogin())
 	if comment.Association() != "NONE" {
-		fmt.Fprintf(&b, " (%s)", strings.Title(strings.ToLower(comment.Association())))
+		fmt.Fprintf(&b, " (%s)", text.Title(comment.Association()))
 	}
 	fmt.Fprintf(&b, " • This comment has been marked as %s\n\n", comment.HiddenReason())
 	return b.String()

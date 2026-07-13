@@ -1,12 +1,27 @@
 /bin
+/share/bash-completion/completions
+/share/fish/vendor_completions.d
 /share/man/man1
+/share/zsh/site-functions
+/share/zsh/vendor-completions
 /gh-cli
 .envrc
 /dist
 /site
 .github/**/node_modules
 /CHANGELOG.md
+/.goreleaser.generated.yml
 /script/build
+/script/build.exe
+/pkg_payload
+/build/macOS/resources
+
+# Windows resource files
+/cmd/gh/*.syso
+
+# Third-party licenses
+/internal/licenses/embed/*/*
+!/internal/licenses/embed/*/PLACEHOLDER
 
 # VS Code
 .vscode
@@ -20,4 +35,12 @@
 # vim
 *.swp
 
+# Emacs
+*~
+
 vendor/
+gh
+
+# Test coverage artifacts
+coverage.out
+lcov.info

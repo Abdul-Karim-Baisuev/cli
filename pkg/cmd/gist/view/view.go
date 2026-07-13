@@ -5,23 +5,28 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/pkg/cmd/gist/shared"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/markdown"
-	"github.com/cli/cli/pkg/prompt"
-	"github.com/cli/cli/pkg/text"
-	"github.com/cli/cli/utils"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghinstance"
+	"github.com/cli/cli/v2/internal/prompter"
+	"github.com/cli/cli/v2/internal/text"
+	"github.com/cli/cli/v2/pkg/cmd/gist/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/markdown"
 	"github.com/spf13/cobra"
 )
 
+type browser interface {
+	Browse(string) error
+}
+
 type ViewOptions struct {
 	IO         *iostreams.IOStreams
+	Config     func() (gh.Config, error)
 	HttpClient func() (*http.Client, error)
+	Browser    browser
+	Prompter   prompter.Prompter
 
 	Selector  string
 	Filename  string
@@ -33,7 +38,10 @@ type ViewOptions struct {
 func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Command {
 	opts := &ViewOptions{
 		IO:         f.IOStreams,
+		Config:     f.Config,
 		HttpClient: f.HttpClient,
+		Browser:    f.Browser,
+		Prompter:   f.Prompter,
 	}
 
 	cmd := &cobra.Command{
@@ -59,7 +67,7 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 
 	cmd.Flags().BoolVarP(&opts.Raw, "raw", "r", false, "Print raw instead of rendered gist contents")
 	cmd.Flags().BoolVarP(&opts.Web, "web", "w", false, "Open gist in the browser")
-	cmd.Flags().BoolVarP(&opts.ListFiles, "files", "", false, "List file names from the gist")
+	cmd.Flags().BoolVar(&opts.ListFiles, "files", false, "List file names from the gist")
 	cmd.Flags().StringVarP(&opts.Filename, "filename", "f", "", "Display a single file from the gist")
 
 	return cmd
@@ -72,29 +80,40 @@ func viewRun(opts *ViewOptions) error {
 		return err
 	}
 
+	cfg, err := opts.Config()
+	if err != nil {
+		return err
+	}
+
+	hostname, _ := cfg.Authentication().DefaultHost()
+
 	cs := opts.IO.ColorScheme()
 	if gistID == "" {
-		gistID, err = promptGists(client, cs)
+		if !opts.IO.CanPrompt() {
+			return cmdutil.FlagErrorf("gist ID or URL required when not running interactively")
+		}
+
+		gist, err := shared.PromptGists(opts.Prompter, client, hostname, cs)
 		if err != nil {
 			return err
 		}
 
-		if gistID == "" {
+		if gist.ID == "" {
 			fmt.Fprintln(opts.IO.Out, "No gists found.")
 			return nil
 		}
+		gistID = gist.ID
 	}
 
 	if opts.Web {
 		gistURL := gistID
 		if !strings.Contains(gistURL, "/") {
-			hostname := ghinstance.OverridableDefault()
 			gistURL = ghinstance.GistPrefix(hostname) + gistID
 		}
 		if opts.IO.IsStderrTTY() {
-			fmt.Fprintf(opts.IO.ErrOut, "Opening %s in your browser.\n", utils.DisplayURL(gistURL))
+			fmt.Fprintf(opts.IO.ErrOut, "Opening %s in your browser.\n", text.DisplayURL(gistURL))
 		}
-		return utils.OpenInBrowser(gistURL)
+		return opts.Browser.Browse(gistURL)
 	}
 
 	if strings.Contains(gistID, "/") {
@@ -105,29 +124,40 @@ func viewRun(opts *ViewOptions) error {
 		gistID = id
 	}
 
-	gist, err := shared.GetGist(client, ghinstance.OverridableDefault(), gistID)
+	gist, err := shared.GetGist(client, hostname, gistID)
 	if err != nil {
 		return err
 	}
 
-	theme := opts.IO.DetectTerminalTheme()
-	markdownStyle := markdown.GetStyle(theme)
+	opts.IO.DetectTerminalTheme()
 	if err := opts.IO.StartPager(); err != nil {
 		fmt.Fprintf(opts.IO.ErrOut, "starting pager failed: %v\n", err)
 	}
 	defer opts.IO.StopPager()
 
 	render := func(gf *shared.GistFile) error {
+		if gf.Truncated {
+			fullContent, err := shared.GetRawGistFile(client, gf.RawURL)
+
+			if err != nil {
+				return err
+			}
+
+			gf.Content = fullContent
+		}
+
 		if shared.IsBinaryContents([]byte(gf.Content)) {
 			if len(gist.Files) == 1 || opts.Filename != "" {
 				return fmt.Errorf("error: file is binary")
 			}
-			_, err = fmt.Fprintln(opts.IO.Out, cs.Gray("(skipping rendering binary content)"))
+			_, err = fmt.Fprintln(opts.IO.Out, cs.Muted("(skipping rendering binary content)"))
 			return nil
 		}
 
 		if strings.Contains(gf.Type, "markdown") && !opts.Raw {
-			rendered, err := markdown.Render(gf.Content, markdownStyle, "")
+			rendered, err := markdown.Render(gf.Content,
+				markdown.WithTheme(opts.IO.TerminalTheme()),
+				markdown.WithWrap(opts.IO.TerminalWidth()))
 			if err != nil {
 				return err
 			}
@@ -177,7 +207,7 @@ func viewRun(opts *ViewOptions) error {
 
 	for i, fn := range filenames {
 		if showFilenames {
-			fmt.Fprintf(opts.IO.Out, "%s\n\n", cs.Gray(fn))
+			fmt.Fprintf(opts.IO.Out, "%s\n\n", cs.Muted(fn))
 		}
 		if err := render(gist.Files[fn]); err != nil {
 			return err
@@ -188,55 +218,4 @@ func viewRun(opts *ViewOptions) error {
 	}
 
 	return nil
-}
-
-func promptGists(client *http.Client, cs *iostreams.ColorScheme) (gistID string, err error) {
-	gists, err := shared.ListGists(client, ghinstance.OverridableDefault(), 10, "all")
-	if err != nil {
-		return "", err
-	}
-
-	if len(gists) == 0 {
-		return "", nil
-	}
-
-	var opts []string
-	var result int
-	var gistIDs = make([]string, len(gists))
-
-	for i, gist := range gists {
-		gistIDs[i] = gist.ID
-		description := ""
-		gistName := ""
-
-		if gist.Description != "" {
-			description = gist.Description
-		}
-
-		filenames := make([]string, 0, len(gist.Files))
-		for fn := range gist.Files {
-			filenames = append(filenames, fn)
-		}
-		sort.Strings(filenames)
-		gistName = filenames[0]
-
-		gistTime := utils.FuzzyAgo(time.Since(gist.UpdatedAt))
-		// TODO: support dynamic maxWidth
-		description = text.Truncate(100, text.ReplaceExcessiveWhitespace(description))
-		opt := fmt.Sprintf("%s %s %s", cs.Bold(gistName), description, cs.Gray(gistTime))
-		opts = append(opts, opt)
-	}
-
-	questions := &survey.Select{
-		Message: "Select a gist",
-		Options: opts,
-	}
-
-	err = prompt.SurveyAskOne(questions, &result)
-
-	if err != nil {
-		return "", err
-	}
-
-	return gistIDs[result], nil
 }

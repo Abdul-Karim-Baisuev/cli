@@ -1,9 +1,12 @@
 package root
 
 import (
-	"net/http"
+	"fmt"
+	"os"
+	"strings"
 
 	"github.com/MakeNowJust/heredoc"
+<<<<<<< HEAD
 	"github.com/cli/cli/api"
 	"github.com/cli/cli/context"
 	"github.com/cli/cli/internal/ghrepo"
@@ -27,62 +30,154 @@ import (
 	versionCmd "github.com/cli/cli/pkg/cmd/version"
 	workflowCmd "github.com/cli/cli/pkg/cmd/workflow"
 	"github.com/cli/cli/pkg/cmdutil"
+=======
+	"github.com/cli/cli/v2/internal/gh/ghtelemetry"
+	accessibilityCmd "github.com/cli/cli/v2/pkg/cmd/accessibility"
+	actionsCmd "github.com/cli/cli/v2/pkg/cmd/actions"
+	agentTaskCmd "github.com/cli/cli/v2/pkg/cmd/agent-task"
+	aliasCmd "github.com/cli/cli/v2/pkg/cmd/alias"
+	"github.com/cli/cli/v2/pkg/cmd/alias/shared"
+	apiCmd "github.com/cli/cli/v2/pkg/cmd/api"
+	attestationCmd "github.com/cli/cli/v2/pkg/cmd/attestation"
+	authCmd "github.com/cli/cli/v2/pkg/cmd/auth"
+	browseCmd "github.com/cli/cli/v2/pkg/cmd/browse"
+	cacheCmd "github.com/cli/cli/v2/pkg/cmd/cache"
+	codespaceCmd "github.com/cli/cli/v2/pkg/cmd/codespace"
+	completionCmd "github.com/cli/cli/v2/pkg/cmd/completion"
+	configCmd "github.com/cli/cli/v2/pkg/cmd/config"
+	copilotCmd "github.com/cli/cli/v2/pkg/cmd/copilot"
+	extensionCmd "github.com/cli/cli/v2/pkg/cmd/extension"
+	"github.com/cli/cli/v2/pkg/cmd/factory"
+	gistCmd "github.com/cli/cli/v2/pkg/cmd/gist"
+	gpgKeyCmd "github.com/cli/cli/v2/pkg/cmd/gpg-key"
+	issueCmd "github.com/cli/cli/v2/pkg/cmd/issue"
+	labelCmd "github.com/cli/cli/v2/pkg/cmd/label"
+	licensesCmd "github.com/cli/cli/v2/pkg/cmd/licenses"
+	orgCmd "github.com/cli/cli/v2/pkg/cmd/org"
+	prCmd "github.com/cli/cli/v2/pkg/cmd/pr"
+	previewCmd "github.com/cli/cli/v2/pkg/cmd/preview"
+	projectCmd "github.com/cli/cli/v2/pkg/cmd/project"
+	releaseCmd "github.com/cli/cli/v2/pkg/cmd/release"
+	repoCmd "github.com/cli/cli/v2/pkg/cmd/repo"
+	creditsCmd "github.com/cli/cli/v2/pkg/cmd/repo/credits"
+	rulesetCmd "github.com/cli/cli/v2/pkg/cmd/ruleset"
+	runCmd "github.com/cli/cli/v2/pkg/cmd/run"
+	searchCmd "github.com/cli/cli/v2/pkg/cmd/search"
+	secretCmd "github.com/cli/cli/v2/pkg/cmd/secret"
+	sendTelemetryCmd "github.com/cli/cli/v2/pkg/cmd/send-telemetry"
+	skillsCmd "github.com/cli/cli/v2/pkg/cmd/skills"
+	sshKeyCmd "github.com/cli/cli/v2/pkg/cmd/ssh-key"
+	statusCmd "github.com/cli/cli/v2/pkg/cmd/status"
+	variableCmd "github.com/cli/cli/v2/pkg/cmd/variable"
+	versionCmd "github.com/cli/cli/v2/pkg/cmd/version"
+	workflowCmd "github.com/cli/cli/v2/pkg/cmd/workflow"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/extensions"
+	"github.com/google/shlex"
+>>>>>>> origin/trunk
 	"github.com/spf13/cobra"
 )
 
-func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) *cobra.Command {
+type AuthError struct {
+	err error
+}
+
+func (ae *AuthError) Error() string {
+	return ae.err.Error()
+}
+
+func NewCmdRoot(f *cmdutil.Factory, telemetry ghtelemetry.CommandRecorder, version, buildDate string) (*cobra.Command, error) {
+	io := f.IOStreams
+	cfg, err := f.Config()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read configuration: %s\n", err)
+	}
+
 	cmd := &cobra.Command{
 		Use:   "gh <command> <subcommand> [flags]",
 		Short: "GitHub CLI",
 		Long:  `Work seamlessly with GitHub from the command line.`,
-
-		SilenceErrors: true,
-		SilenceUsage:  true,
 		Example: heredoc.Doc(`
 			$ gh issue create
 			$ gh repo clone cli/cli
 			$ gh pr checkout 321
 		`),
 		Annotations: map[string]string{
-			"help:feedback": heredoc.Doc(`
-				Open an issue using 'gh issue create -R github.com/cli/cli'
-			`),
-			"help:environment": heredoc.Doc(`
-				See 'gh help environment' for the list of supported environment variables.
-			`),
+			"versionInfo": versionCmd.Format(version, buildDate),
+		},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// require that the user is authenticated before running most commands
+			if cmdutil.IsAuthCheckEnabled(cmd) && !cmdutil.CheckAuth(cfg) {
+				parent := cmd.Parent()
+				if parent != nil && parent.Use == "codespace" {
+					fmt.Fprintln(io.ErrOut, "To get started with GitHub CLI, please run:  gh auth login -s codespace")
+				} else {
+					fmt.Fprint(io.ErrOut, authHelp())
+				}
+				return &AuthError{}
+			}
+
+			return nil
 		},
 	}
 
-	cmd.SetOut(f.IOStreams.Out)
-	cmd.SetErr(f.IOStreams.ErrOut)
-
-	cs := f.IOStreams.ColorScheme()
-
-	helpHelper := func(command *cobra.Command, args []string) {
-		rootHelpFunc(cs, command, args)
-	}
+	// cmd.SetOut(f.IOStreams.Out)    // can't use due to https://github.com/spf13/cobra/issues/1708
+	// cmd.SetErr(f.IOStreams.ErrOut) // just let it default to os.Stderr instead
 
 	cmd.PersistentFlags().Bool("help", false, "Show help for command")
-	cmd.SetHelpFunc(helpHelper)
-	cmd.SetUsageFunc(rootUsageFunc)
-	cmd.SetFlagErrorFunc(rootFlagErrorFunc)
 
-	formattedVersion := versionCmd.Format(version, buildDate)
-	cmd.SetVersionTemplate(formattedVersion)
-	cmd.Version = formattedVersion
-	cmd.Flags().Bool("version", false, "Show gh version")
+	// override Cobra's default behaviors unless an opt-out has been set
+	if os.Getenv("GH_COBRA") == "" {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+
+		// this --version flag is checked in rootHelpFunc
+		cmd.Flags().Bool("version", false, "Show gh version")
+
+		cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+			rootHelpFunc(f, c, args)
+		})
+		cmd.SetUsageFunc(func(c *cobra.Command) error {
+			return rootUsageFunc(f.IOStreams.ErrOut, c)
+		})
+		cmd.SetFlagErrorFunc(rootFlagErrorFunc)
+	}
+
+	cmd.AddGroup(&cobra.Group{
+		ID:    "core",
+		Title: "Core commands",
+	})
+	cmd.AddGroup(&cobra.Group{
+		ID:    "actions",
+		Title: "GitHub Actions commands",
+	})
+	cmd.AddGroup(&cobra.Group{
+		ID:    "extension",
+		Title: "Extension commands",
+	})
 
 	// Child commands
 	cmd.AddCommand(versionCmd.NewCmdVersion(f, version, buildDate))
+	cmd.AddCommand(accessibilityCmd.NewCmdAccessibility(f))
+	cmd.AddCommand(actionsCmd.NewCmdActions(f))
 	cmd.AddCommand(aliasCmd.NewCmdAlias(f))
 	cmd.AddCommand(authCmd.NewCmdAuth(f))
+	cmd.AddCommand(attestationCmd.NewCmdAttestation(f))
 	cmd.AddCommand(configCmd.NewCmdConfig(f))
-	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
 	cmd.AddCommand(gistCmd.NewCmdGist(f))
+	cmd.AddCommand(gpgKeyCmd.NewCmdGPGKey(f))
 	cmd.AddCommand(completionCmd.NewCmdCompletion(f.IOStreams))
+	cmd.AddCommand(extensionCmd.NewCmdExtension(f))
+	cmd.AddCommand(searchCmd.NewCmdSearch(f))
 	cmd.AddCommand(secretCmd.NewCmdSecret(f))
+	cmd.AddCommand(variableCmd.NewCmdVariable(f))
 	cmd.AddCommand(sshKeyCmd.NewCmdSSHKey(f))
+	cmd.AddCommand(codespaceCmd.NewCmdCodespace(f))
+	cmd.AddCommand(projectCmd.NewCmdProject(f))
+	cmd.AddCommand(previewCmd.NewCmdPreview(f))
+	cmd.AddCommand(skillsCmd.NewCmdSkills(f, telemetry))
 
+<<<<<<< HEAD
 	cmd.AddCommand(actionsCmd.NewCmdActions(f))
 	cmd.AddCommand(runCmd.NewCmdRun(f))
 	cmd.AddCommand(jobCmd.NewCmdJob(f))
@@ -93,61 +188,113 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) *cobra.Command {
 	bareHTTPCmdFactory.HttpClient = bareHTTPClient(f, version)
 
 	cmd.AddCommand(apiCmd.NewCmdApi(&bareHTTPCmdFactory, nil))
+=======
+	// Root commands with standalone functionality and no subcommands
+	cmd.AddCommand(copilotCmd.NewCmdCopilot(f, telemetry, nil))
+	cmd.AddCommand(statusCmd.NewCmdStatus(f, nil))
+	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
+	cmd.AddCommand(licensesCmd.NewCmdLicenses(f))
+	cmd.AddCommand(sendTelemetryCmd.NewCmdSendTelemetry(f))
+>>>>>>> origin/trunk
 
 	// below here at the commands that require the "intelligent" BaseRepo resolver
 	repoResolvingCmdFactory := *f
-	repoResolvingCmdFactory.BaseRepo = resolvedBaseRepo(f)
+	repoResolvingCmdFactory.BaseRepo = factory.SmartBaseRepoFunc(f)
 
+	cmd.AddCommand(agentTaskCmd.NewCmdAgentTask(&repoResolvingCmdFactory))
+	cmd.AddCommand(browseCmd.NewCmdBrowse(&repoResolvingCmdFactory, nil))
 	cmd.AddCommand(prCmd.NewCmdPR(&repoResolvingCmdFactory))
+	cmd.AddCommand(orgCmd.NewCmdOrg(&repoResolvingCmdFactory))
 	cmd.AddCommand(issueCmd.NewCmdIssue(&repoResolvingCmdFactory))
 	cmd.AddCommand(releaseCmd.NewCmdRelease(&repoResolvingCmdFactory))
 	cmd.AddCommand(repoCmd.NewCmdRepo(&repoResolvingCmdFactory))
+	cmd.AddCommand(rulesetCmd.NewCmdRuleset(&repoResolvingCmdFactory))
+	cmd.AddCommand(runCmd.NewCmdRun(&repoResolvingCmdFactory))
+	cmd.AddCommand(workflowCmd.NewCmdWorkflow(&repoResolvingCmdFactory))
+	cmd.AddCommand(labelCmd.NewCmdLabel(&repoResolvingCmdFactory))
+	cmd.AddCommand(cacheCmd.NewCmdCache(&repoResolvingCmdFactory))
+	cmd.AddCommand(apiCmd.NewCmdApi(&repoResolvingCmdFactory, nil))
 
 	// Help topics
-	cmd.AddCommand(NewHelpTopic("environment"))
-	referenceCmd := NewHelpTopic("reference")
-	referenceCmd.SetHelpFunc(referenceHelpFn(f.IOStreams))
-	cmd.AddCommand(referenceCmd)
+	var referenceCmd *cobra.Command
+	for _, ht := range HelpTopics {
+		helpTopicCmd := NewCmdHelpTopic(f.IOStreams, ht)
+		cmd.AddCommand(helpTopicCmd)
+
+		// See bottom of the function for why we explicitly care about the reference cmd
+		if ht.name == "reference" {
+			referenceCmd = helpTopicCmd
+		}
+	}
+
+	// Extensions
+	em := f.ExtensionManager
+	for _, e := range em.List() {
+		extensionCmd := NewCmdExtension(io, em, e, nil)
+		// Don't register an extension command if it would
+		// conflict with a core command.
+		_, _, err := cmd.Find([]string{extensionCmd.Name()})
+		if err == nil {
+			continue
+		}
+
+		cmd.AddCommand(extensionCmd)
+	}
+
+	// Aliases
+	aliases := cfg.Aliases()
+	validAliasName := shared.ValidAliasNameFunc(cmd)
+	validAliasExpansion := shared.ValidAliasExpansionFunc(cmd)
+	for k, v := range aliases.All() {
+		aliasName := k
+		aliasValue := v
+		if validAliasName(aliasName) && validAliasExpansion(aliasValue) {
+			split, _ := shlex.Split(aliasName)
+			parentCmd, parentArgs, _ := cmd.Find(split)
+			if !parentCmd.ContainsGroup("alias") {
+				parentCmd.AddGroup(&cobra.Group{
+					ID:    "alias",
+					Title: "Alias commands",
+				})
+			}
+			if strings.HasPrefix(aliasValue, "!") {
+				shellAliasCmd := NewCmdShellAlias(io, parentArgs[0], aliasValue)
+				parentCmd.AddCommand(shellAliasCmd)
+			} else {
+				aliasCmd := NewCmdAlias(io, parentArgs[0], aliasValue)
+				split, _ := shlex.Split(aliasValue)
+				child, _, _ := cmd.Find(split)
+				aliasCmd.SetUsageFunc(func(_ *cobra.Command) error {
+					return rootUsageFunc(f.IOStreams.ErrOut, child)
+				})
+				aliasCmd.SetHelpFunc(func(_ *cobra.Command, args []string) {
+					rootHelpFunc(f, child, args)
+				})
+				parentCmd.AddCommand(aliasCmd)
+			}
+		}
+	}
+
+	// Official extension stubs: hidden commands that suggest installing
+	// GitHub-owned extensions when invoked. Registered after real extensions
+	// and aliases so that both take priority over stubs.
+	for i := range extensions.OfficialExtensions {
+		ext := &extensions.OfficialExtensions[i]
+		if _, _, err := cmd.Find([]string{ext.Name}); err == nil {
+			continue
+		}
+		cmd.AddCommand(NewCmdOfficialExtensionStub(io, f.Prompter, em, ext))
+	}
 
 	cmdutil.DisableAuthCheck(cmd)
+	cmdutil.RecordTelemetryForSubcommands(cmd, telemetry)
 
-	// this needs to appear last:
-	referenceCmd.Long = referenceLong(cmd)
-	return cmd
-}
-
-func bareHTTPClient(f *cmdutil.Factory, version string) func() (*http.Client, error) {
-	return func() (*http.Client, error) {
-		cfg, err := f.Config()
-		if err != nil {
-			return nil, err
-		}
-		return factory.NewHTTPClient(f.IOStreams, cfg, version, false), nil
-	}
-}
-
-func resolvedBaseRepo(f *cmdutil.Factory) func() (ghrepo.Interface, error) {
-	return func() (ghrepo.Interface, error) {
-		httpClient, err := f.HttpClient()
-		if err != nil {
-			return nil, err
-		}
-
-		apiClient := api.NewClientFromHTTP(httpClient)
-
-		remotes, err := f.Remotes()
-		if err != nil {
-			return nil, err
-		}
-		repoContext, err := context.ResolveRemotesToRepos(remotes, apiClient, "")
-		if err != nil {
-			return nil, err
-		}
-		baseRepo, err := repoContext.BaseRepo(f.IOStreams)
-		if err != nil {
-			return nil, err
-		}
-
-		return baseRepo, nil
-	}
+	// The reference command produces paged output that displays information on every other command.
+	// Therefore, we explicitly set the Long text and HelpFunc here after all other commands are registered.
+	// We experimented with producing the paged output dynamically when the HelpFunc is called but since
+	// doc generation makes use of the Long text, it is simpler to just be explicit here that this command
+	// is special.
+	referenceCmd.Long = stringifyReference(cmd)
+	referenceCmd.SetHelpFunc(longPager(f.IOStreams))
+	return cmd, nil
 }

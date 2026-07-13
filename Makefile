@@ -5,27 +5,56 @@ export CGO_CFLAGS
 CGO_LDFLAGS ?= $(filter -g -L% -l% -O%,${LDFLAGS})
 export CGO_LDFLAGS
 
+EXE =
+ifeq ($(shell go env GOOS),windows)
+EXE = .exe
+endif
+
 ## The following tasks delegate to `script/build.go` so they can be run cross-platform.
 
-.PHONY: bin/gh
-bin/gh: script/build
-	@script/build bin/gh
+.PHONY: bin/gh$(EXE)
+bin/gh$(EXE): script/build$(EXE)
+	@script/build$(EXE) $@
 
-script/build: script/build.go
-	go build -o script/build script/build.go
+script/build$(EXE): script/build.go
+ifeq ($(EXE),)
+	GOOS= GOARCH= GOARM= GOFLAGS= CGO_ENABLED= go build -o $@ $<
+else
+	go build -o $@ $<
+endif
 
 .PHONY: clean
-clean: script/build
-	@script/build clean
+clean: script/build$(EXE)
+	@$< $@
 
 .PHONY: manpages
-manpages: script/build
-	@script/build manpages
+manpages: script/build$(EXE)
+	@$< $@
 
-# just a convenience task around `go test`
+.PHONY: completions
+completions: bin/gh$(EXE)
+	mkdir -p ./share/bash-completion/completions ./share/fish/vendor_completions.d ./share/zsh/site-functions ./share/zsh/vendor-completions
+	bin/gh$(EXE) completion -s bash > ./share/bash-completion/completions/gh
+	bin/gh$(EXE) completion -s fish > ./share/fish/vendor_completions.d/gh.fish
+	bin/gh$(EXE) completion -s zsh > ./share/zsh/site-functions/_gh
+	# On Debian/Ubuntu the default zsh fpath does not include /usr/share/zsh/site-functions
+	# but does include /usr/share/zsh/vendor-completions, so we ship both paths in our
+	# .deb and .rpm packages. See https://github.com/cli/cli/issues/13166
+	cp ./share/zsh/site-functions/_gh ./share/zsh/vendor-completions/_gh
+
+.PHONY: lint
+lint:
+	golangci-lint run ./...
+
+# just convenience tasks around `go test`
 .PHONY: test
 test:
 	go test ./...
+
+# For more information, see https://github.com/cli/cli/blob/trunk/acceptance/README.md
+.PHONY: acceptance
+acceptance:
+	go test -tags acceptance ./acceptance
 
 ## Site-related tasks are exclusively intended for use by the GitHub CLI team and for our release automation.
 
@@ -53,17 +82,43 @@ endif
 ## Install/uninstall tasks are here for use on *nix platform. On Windows, there is no equivalent.
 
 DESTDIR :=
-prefix  := /usr/local
+prefix  ?= /usr/local
 bindir  := ${prefix}/bin
-mandir  := ${prefix}/share/man
+datadir := ${prefix}/share
+mandir  := ${datadir}/man
 
 .PHONY: install
-install: bin/gh manpages
+install: bin/gh manpages completions
 	install -d ${DESTDIR}${bindir}
 	install -m755 bin/gh ${DESTDIR}${bindir}/
 	install -d ${DESTDIR}${mandir}/man1
 	install -m644 ./share/man/man1/* ${DESTDIR}${mandir}/man1/
+	install -d ${DESTDIR}${datadir}/bash-completion/completions
+	install -m644 ./share/bash-completion/completions/gh ${DESTDIR}${datadir}/bash-completion/completions/gh
+	install -d ${DESTDIR}${datadir}/fish/vendor_completions.d
+	install -m644 ./share/fish/vendor_completions.d/gh.fish ${DESTDIR}${datadir}/fish/vendor_completions.d/gh.fish
+	install -d ${DESTDIR}${datadir}/zsh/site-functions
+	install -m644 ./share/zsh/site-functions/_gh ${DESTDIR}${datadir}/zsh/site-functions/_gh
 
 .PHONY: uninstall
 uninstall:
 	rm -f ${DESTDIR}${bindir}/gh ${DESTDIR}${mandir}/man1/gh.1 ${DESTDIR}${mandir}/man1/gh-*.1
+	rm -f ${DESTDIR}${datadir}/bash-completion/completions/gh
+	rm -f ${DESTDIR}${datadir}/fish/vendor_completions.d/gh.fish
+	rm -f ${DESTDIR}${datadir}/zsh/site-functions/_gh
+
+.PHONY: macospkg
+macospkg: manpages completions
+ifndef VERSION
+	$(error VERSION is not set. Use `make macospkg VERSION=vX.Y.Z`)
+endif
+	./script/release --local "$(VERSION)" --platform macos
+	./script/pkgmacos $(VERSION)
+
+.PHONY: licenses
+licenses:
+	./script/licenses $$(go env GOOS) $$(go env GOARCH)
+
+.PHONY: licenses-check
+licenses-check:
+	./script/licenses --check
