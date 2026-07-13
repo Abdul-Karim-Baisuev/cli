@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/text"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/internal/text"
 )
 
 type TablePrinter interface {

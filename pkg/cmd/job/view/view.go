@@ -7,15 +7,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/MakeNowJust/heredoc"
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/run/shared"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
-	"github.com/cli/cli/utils"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/text"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +21,7 @@ type ViewOptions struct {
 	HttpClient func() (*http.Client, error)
 	IO         *iostreams.IOStreams
 	BaseRepo   func() (ghrepo.Interface, error)
+	Prompter   shared.Prompter
 
 	JobID      string
 	Log        bool
@@ -37,6 +36,7 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 	opts := &ViewOptions{
 		IO:         f.IOStreams,
 		HttpClient: f.HttpClient,
+		Prompter:   f.Prompter,
 		Now:        time.Now,
 	}
 	cmd := &cobra.Command{
@@ -61,7 +61,7 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 			if len(args) > 0 {
 				opts.JobID = args[0]
 			} else if !opts.IO.CanPrompt() {
-				return &cmdutil.FlagError{Err: errors.New("job ID required when not running interactively")}
+				return cmdutil.FlagErrorWrap(errors.New("job ID required when not running interactively"))
 			} else {
 				opts.Prompt = true
 			}
@@ -96,7 +96,11 @@ func runView(opts *ViewOptions) error {
 
 	jobID := opts.JobID
 	if opts.Prompt {
-		runID, err := shared.PromptForRun(cs, client, repo)
+		runs, err := shared.GetRuns(client, repo, nil, 10)
+		if err != nil {
+			return fmt.Errorf("failed to get runs: %w", err)
+		}
+		runID, err := shared.SelectRun(opts.Prompter, cs, runs.WorkflowRuns)
 		if err != nil {
 			return err
 		}
@@ -107,7 +111,7 @@ func runView(opts *ViewOptions) error {
 		opts.IO.StartProgressIndicator()
 		defer opts.IO.StopProgressIndicator()
 
-		run, err := shared.GetRun(client, repo, runID)
+		run, err := shared.GetRun(client, repo, runID, 0)
 		if err != nil {
 			return fmt.Errorf("failed to get run: %w", err)
 		}
@@ -170,7 +174,7 @@ func runView(opts *ViewOptions) error {
 	fmt.Fprintf(out, "%s (ID %s)\n", cs.Bold(job.Name), cs.Cyanf("%d", job.ID))
 	fmt.Fprintf(out, "%s %s ago%s\n",
 		symColor(symbol),
-		utils.FuzzyAgoAbbr(opts.Now(), job.StartedAt),
+		text.FuzzyAgoAbbr(opts.Now(), job.StartedAt),
 		elapsedStr)
 
 	fmt.Fprintln(out)
@@ -217,7 +221,7 @@ func getJob(client *api.Client, repo ghrepo.Interface, jobID string) (*shared.Jo
 
 func promptForJob(opts ViewOptions, client *api.Client, repo ghrepo.Interface, run shared.Run) (string, error) {
 	cs := opts.IO.ColorScheme()
-	jobs, err := shared.GetJobs(client, repo, run)
+	jobs, err := shared.GetJobs(client, repo, &run, 0)
 	if err != nil {
 		return "", err
 	}
@@ -225,8 +229,6 @@ func promptForJob(opts ViewOptions, client *api.Client, repo ghrepo.Interface, r
 	if len(jobs) == 1 {
 		return fmt.Sprintf("%d", jobs[0].ID), nil
 	}
-
-	var selected int
 
 	candidates := []string{}
 
@@ -237,11 +239,7 @@ func promptForJob(opts ViewOptions, client *api.Client, repo ghrepo.Interface, r
 
 	// TODO consider custom filter so it's fuzzier. right now matches start anywhere in string but
 	// become contiguous
-	err = prompt.SurveyAskOne(&survey.Select{
-		Message:  "Select a job to view",
-		Options:  candidates,
-		PageSize: 10,
-	}, &selected)
+	selected, err := opts.Prompter.Select("Select a job to view", "", candidates)
 	if err != nil {
 		return "", err
 	}

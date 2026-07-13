@@ -3,15 +3,6 @@ package list
 import (
 	"fmt"
 	"net/http"
-<<<<<<< HEAD
-
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/run/shared"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/utils"
-=======
 	"time"
 
 	"github.com/MakeNowJust/heredoc"
@@ -23,28 +14,17 @@ import (
 	workflowShared "github.com/cli/cli/v2/pkg/cmd/workflow/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/iostreams"
->>>>>>> origin/trunk
 	"github.com/spf13/cobra"
 )
 
 const (
-<<<<<<< HEAD
-	defaultLimit = 10
-=======
 	defaultLimit = 20
->>>>>>> origin/trunk
 )
 
 type ListOptions struct {
 	IO         *iostreams.IOStreams
 	HttpClient func() (*http.Client, error)
 	BaseRepo   func() (ghrepo.Interface, error)
-<<<<<<< HEAD
-
-	PlainOutput bool
-
-	Limit int
-=======
 	Prompter   iprompter
 
 	Exporter cmdutil.Exporter
@@ -64,22 +44,12 @@ type ListOptions struct {
 
 type iprompter interface {
 	Select(string, string, []string) (int, error)
->>>>>>> origin/trunk
 }
 
 func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Command {
 	opts := &ListOptions{
 		IO:         f.IOStreams,
 		HttpClient: f.HttpClient,
-<<<<<<< HEAD
-	}
-
-	cmd := &cobra.Command{
-		Use:    "list",
-		Short:  "List recent workflow runs",
-		Args:   cobra.NoArgs,
-		Hidden: true,
-=======
 		Prompter:   f.Prompter,
 		now:        time.Now(),
 	}
@@ -99,21 +69,12 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 		`, "`"),
 		Aliases: []string{"ls"},
 		Args:    cobra.NoArgs,
->>>>>>> origin/trunk
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// support `-R, --repo` override
 			opts.BaseRepo = f.BaseRepo
 
-<<<<<<< HEAD
-			terminal := opts.IO.IsStdoutTTY() && opts.IO.IsStdinTTY()
-			opts.PlainOutput = !terminal
-
-			if opts.Limit < 1 {
-				return &cmdutil.FlagError{Err: fmt.Errorf("invalid limit: %v", opts.Limit)}
-=======
 			if opts.Limit < 1 {
 				return cmdutil.FlagErrorf("invalid limit: %v", opts.Limit)
->>>>>>> origin/trunk
 			}
 
 			if runF != nil {
@@ -125,8 +86,6 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 	}
 
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum number of runs to fetch")
-<<<<<<< HEAD
-=======
 	cmd.Flags().StringVarP(&opts.WorkflowSelector, "workflow", "w", "", "Filter runs by workflow")
 	cmd.Flags().StringVarP(&opts.Branch, "branch", "b", "", "Filter runs by branch")
 	cmd.Flags().StringVarP(&opts.Actor, "user", "u", "", "Filter runs by user who triggered the run")
@@ -138,7 +97,6 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 	cmdutil.AddJSONFlags(cmd, &opts.Exporter, shared.RunFields)
 
 	_ = cmdutil.RegisterBranchCompletionFlags(f.GitClient, cmd, "branch")
->>>>>>> origin/trunk
 
 	return cmd
 }
@@ -155,10 +113,6 @@ func listRun(opts *ListOptions) error {
 	}
 	client := api.NewClientFromHTTP(c)
 
-<<<<<<< HEAD
-	opts.IO.StartProgressIndicator()
-	runs, err := shared.GetRuns(client, baseRepo, opts.Limit)
-=======
 	filters := &shared.FilterOptions{
 		Branch:  opts.Branch,
 		Actor:   opts.Actor,
@@ -187,65 +141,10 @@ func listRun(opts *ListOptions) error {
 		}
 	}
 	runsResult, err := shared.GetRuns(client, baseRepo, filters, opts.Limit)
->>>>>>> origin/trunk
 	opts.IO.StopProgressIndicator()
 	if err != nil {
 		return fmt.Errorf("failed to get runs: %w", err)
 	}
-<<<<<<< HEAD
-
-	tp := utils.NewTablePrinter(opts.IO)
-
-	cs := opts.IO.ColorScheme()
-
-	if len(runs) == 0 {
-		if !opts.PlainOutput {
-			fmt.Fprintln(opts.IO.ErrOut, "No runs found")
-		}
-		return nil
-	}
-
-	out := opts.IO.Out
-
-	for _, run := range runs {
-		if opts.PlainOutput {
-			tp.AddField(string(run.Status), nil, nil)
-			tp.AddField(string(run.Conclusion), nil, nil)
-		} else {
-			symbol, symbolColor := shared.Symbol(cs, run.Status, run.Conclusion)
-			tp.AddField(symbol, nil, symbolColor)
-		}
-
-		tp.AddField(run.CommitMsg(), nil, cs.Bold)
-
-		tp.AddField(run.Name, nil, nil)
-		tp.AddField(run.HeadBranch, nil, cs.Bold)
-		tp.AddField(string(run.Event), nil, nil)
-
-		if opts.PlainOutput {
-			elapsed := run.UpdatedAt.Sub(run.CreatedAt)
-			if elapsed < 0 {
-				elapsed = 0
-			}
-			tp.AddField(elapsed.String(), nil, nil)
-		}
-
-		tp.AddField(fmt.Sprintf("%d", run.ID), nil, cs.Cyan)
-
-		tp.EndRow()
-	}
-
-	err = tp.Render()
-	if err != nil {
-		return err
-	}
-
-	if !opts.PlainOutput {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "For details on a run, try: gh run view <run-id>")
-	}
-
-=======
 	runs := runsResult.WorkflowRuns
 	if len(runs) == 0 && opts.Exporter == nil {
 		return cmdutil.NewNoResultsError("no runs found")
@@ -287,6 +186,5 @@ func listRun(opts *ListOptions) error {
 		return err
 	}
 
->>>>>>> origin/trunk
 	return nil
 }

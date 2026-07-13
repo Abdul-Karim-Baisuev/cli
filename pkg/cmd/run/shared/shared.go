@@ -1,20 +1,6 @@
 package shared
 
 import (
-<<<<<<< HEAD
-	"fmt"
-	"net/url"
-	"strings"
-	"time"
-
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
-)
-
-=======
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,7 +19,6 @@ type Prompter interface {
 	Select(string, string, []string) (int, error)
 }
 
->>>>>>> origin/trunk
 const (
 	// Run statuses
 	Queued     Status = "queued"
@@ -41,10 +26,7 @@ const (
 	InProgress Status = "in_progress"
 	Requested  Status = "requested"
 	Waiting    Status = "waiting"
-<<<<<<< HEAD
-=======
 	Pending    Status = "pending"
->>>>>>> origin/trunk
 
 	// Run conclusions
 	ActionRequired Conclusion = "action_required"
@@ -65,16 +47,6 @@ type Status string
 type Conclusion string
 type Level string
 
-<<<<<<< HEAD
-type Run struct {
-	Name           string
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Status         Status
-	Conclusion     Conclusion
-	Event          string
-	ID             int
-=======
 var AllStatuses = []string{
 	"queued",
 	"completed",
@@ -128,15 +100,12 @@ type Run struct {
 	WorkflowID     int64  `json:"workflow_id"`
 	Number         int64  `json:"run_number"`
 	Attempt        uint64 `json:"run_attempt"`
->>>>>>> origin/trunk
 	HeadBranch     string `json:"head_branch"`
 	JobsURL        string `json:"jobs_url"`
 	HeadCommit     Commit `json:"head_commit"`
 	HeadSha        string `json:"head_sha"`
 	URL            string `json:"html_url"`
 	HeadRepository Repo   `json:"head_repository"`
-<<<<<<< HEAD
-=======
 	Jobs           []Job  `json:"-"` // populated by GetJobs
 }
 
@@ -157,7 +126,6 @@ func (r *Run) Duration(now time.Time) time.Duration {
 		return 0
 	}
 	return d.Round(time.Second)
->>>>>>> origin/trunk
 }
 
 type Repo struct {
@@ -171,16 +139,12 @@ type Commit struct {
 	Message string
 }
 
-<<<<<<< HEAD
-func (r Run) CommitMsg() string {
-=======
 // Title is the display title for a run, falling back to the commit subject if unavailable
 func (r Run) Title() string {
 	if r.DisplayTitle != "" {
 		return r.DisplayTitle
 	}
 
->>>>>>> origin/trunk
 	commitLines := strings.Split(r.HeadCommit.Message, "\n")
 	if len(commitLines) > 0 {
 		return commitLines[0]
@@ -189,26 +153,6 @@ func (r Run) Title() string {
 	}
 }
 
-<<<<<<< HEAD
-type Job struct {
-	ID          int
-	Status      Status
-	Conclusion  Conclusion
-	Name        string
-	Steps       []Step
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt time.Time `json:"completed_at"`
-	URL         string    `json:"html_url"`
-}
-
-type Step struct {
-	Name       string
-	Status     Status
-	Conclusion Conclusion
-	Number     int
-}
-
-=======
 // WorkflowName returns the human-readable name of the workflow that this run belongs to.
 // TODO: consider lazy-loading the underlying API data to avoid extra API calls unless necessary
 func (r Run) WorkflowName() string {
@@ -302,7 +246,6 @@ func (s Steps) Len() int           { return len(s) }
 func (s Steps) Less(i, j int) bool { return s[i].Number < s[j].Number }
 func (s Steps) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
->>>>>>> origin/trunk
 type Annotation struct {
 	JobName   string
 	Message   string
@@ -323,11 +266,6 @@ func AnnotationSymbol(cs *iostreams.ColorScheme, a Annotation) string {
 }
 
 type CheckRun struct {
-<<<<<<< HEAD
-	ID int
-}
-
-=======
 	ID int64
 }
 
@@ -339,7 +277,6 @@ var ErrMissingAnnotationsPermissions = errors.New("missing annotations permissio
 // If the API returns a 403, a custom ErrMissingAnnotationsPermissions error is returned.
 //
 // When fine-grained PATs support checks:read permission, we can remove the need for this at the call sites.
->>>>>>> origin/trunk
 func GetAnnotations(client *api.Client, repo ghrepo.Interface, job Job) ([]Annotation, error) {
 	var result []*Annotation
 
@@ -347,8 +284,6 @@ func GetAnnotations(client *api.Client, repo ghrepo.Interface, job Job) ([]Annot
 
 	err := client.REST(repo.RepoHost(), "GET", path, nil, &result)
 	if err != nil {
-<<<<<<< HEAD
-=======
 		var httpError api.HTTPError
 		if !errors.As(err, &httpError) {
 			return nil, err
@@ -362,7 +297,6 @@ func GetAnnotations(client *api.Client, repo ghrepo.Interface, job Job) ([]Annot
 			return nil, ErrMissingAnnotationsPermissions
 		}
 
->>>>>>> origin/trunk
 		return nil, err
 	}
 
@@ -385,27 +319,6 @@ func IsFailureState(c Conclusion) bool {
 	}
 }
 
-<<<<<<< HEAD
-type RunsPayload struct {
-	WorkflowRuns []Run `json:"workflow_runs"`
-}
-
-func GetRuns(client *api.Client, repo ghrepo.Interface, limit int) ([]Run, error) {
-	perPage := limit
-	page := 1
-	if limit > 100 {
-		perPage = 100
-	}
-
-	runs := []Run{}
-
-	for len(runs) < limit {
-		var result RunsPayload
-
-		path := fmt.Sprintf("repos/%s/actions/runs?per_page=%d&page=%d", ghrepo.FullName(repo), perPage, page)
-
-		err := client.REST(repo.RepoHost(), "GET", path, nil, &result)
-=======
 func IsSkipped(c Conclusion) bool {
 	return c == Skipped
 }
@@ -488,41 +401,10 @@ pagination:
 		var response RunsPayload
 		var err error
 		path, err = client.RESTWithNext(repo.RepoHost(), "GET", path, nil, &response)
->>>>>>> origin/trunk
 		if err != nil {
 			return nil, err
 		}
 
-<<<<<<< HEAD
-		if len(result.WorkflowRuns) == 0 {
-			break
-		}
-
-		for _, run := range result.WorkflowRuns {
-			runs = append(runs, run)
-			if len(runs) == limit {
-				break
-			}
-		}
-
-		if len(result.WorkflowRuns) < perPage {
-			break
-		}
-
-		page++
-	}
-
-	return runs, nil
-}
-
-type JobsPayload struct {
-	Jobs []Job
-}
-
-func GetJobs(client *api.Client, repo ghrepo.Interface, run Run) ([]Job, error) {
-	var result JobsPayload
-	parsed, err := url.Parse(run.JobsURL)
-=======
 		if result == nil {
 			result = &response
 			if len(result.WorkflowRuns) == limit {
@@ -625,59 +507,27 @@ func GetJob(client *api.Client, repo ghrepo.Interface, jobID string) (*Job, erro
 
 	var result Job
 	err := client.REST(repo.RepoHost(), "GET", path, nil, &result)
->>>>>>> origin/trunk
 	if err != nil {
 		return nil, err
 	}
 
-<<<<<<< HEAD
-	err = client.REST(repo.RepoHost(), "GET", parsed.Path[1:], nil, &result)
-	if err != nil {
-		return nil, err
-	}
-	return result.Jobs, nil
-}
-
-func PromptForRun(cs *iostreams.ColorScheme, client *api.Client, repo ghrepo.Interface) (string, error) {
-	// TODO arbitrary limit
-	runs, err := GetRuns(client, repo, 10)
-	if err != nil {
-		return "", err
-	}
-
-	var selected int
-=======
 	return &result, nil
 }
 
 // SelectRun prompts the user to select a run from a list of runs by using the recommended prompter interface
 func SelectRun(p Prompter, cs *iostreams.ColorScheme, runs []Run) (string, error) {
 	now := time.Now()
->>>>>>> origin/trunk
 
 	candidates := []string{}
 
 	for _, run := range runs {
 		symbol, _ := Symbol(cs, run.Status, run.Conclusion)
 		candidates = append(candidates,
-<<<<<<< HEAD
-			fmt.Sprintf("%s %s, %s (%s)", symbol, run.CommitMsg(), run.Name, run.HeadBranch))
-	}
-
-	// TODO consider custom filter so it's fuzzier. right now matches start anywhere in string but
-	// become contiguous
-	err = prompt.SurveyAskOne(&survey.Select{
-		Message:  "Select a workflow run",
-		Options:  candidates,
-		PageSize: 10,
-	}, &selected)
-=======
 			// TODO truncate commit message, long ones look terrible
 			fmt.Sprintf("%s %s, %s [%s] %s", symbol, run.Title(), run.WorkflowName(), run.HeadBranch, preciseAgo(now, run.StartedTime())))
 	}
 
 	selected, err := p.Select("Select a workflow run", "", candidates)
->>>>>>> origin/trunk
 
 	if err != nil {
 		return "", err
@@ -686,12 +536,6 @@ func SelectRun(p Prompter, cs *iostreams.ColorScheme, runs []Run) (string, error
 	return fmt.Sprintf("%d", runs[selected].ID), nil
 }
 
-<<<<<<< HEAD
-func GetRun(client *api.Client, repo ghrepo.Interface, runID string) (*Run, error) {
-	var result Run
-
-	path := fmt.Sprintf("repos/%s/actions/runs/%s", ghrepo.FullName(repo), runID)
-=======
 func GetRun(client *api.Client, repo ghrepo.Interface, runID string, attempt uint64) (*Run, error) {
 	var result Run
 
@@ -700,15 +544,12 @@ func GetRun(client *api.Client, repo ghrepo.Interface, runID string, attempt uin
 	if attempt > 0 {
 		path = fmt.Sprintf("repos/%s/actions/runs/%s/attempts/%d?exclude_pull_requests=true", ghrepo.FullName(repo), runID, attempt)
 	}
->>>>>>> origin/trunk
 
 	err := client.REST(repo.RepoHost(), "GET", path, nil, &result)
 	if err != nil {
 		return nil, err
 	}
 
-<<<<<<< HEAD
-=======
 	if attempt > 0 {
 		result.URL, err = url.JoinPath(result.URL, fmt.Sprintf("/attempts/%d", attempt))
 		if err != nil {
@@ -724,7 +565,6 @@ func GetRun(client *api.Client, repo ghrepo.Interface, runID string, attempt uin
 		result.workflowName = workflow.Name
 	}
 
->>>>>>> origin/trunk
 	return &result, nil
 }
 
@@ -736,21 +576,13 @@ func Symbol(cs *iostreams.ColorScheme, status Status, conclusion Conclusion) (st
 		switch conclusion {
 		case Success:
 			return cs.SuccessIconWithColor(noColor), cs.Green
-<<<<<<< HEAD
-		case Skipped, Cancelled, Neutral:
-			return cs.SuccessIconWithColor(noColor), cs.Gray
-=======
 		case Skipped, Neutral:
 			return "-", cs.Muted
->>>>>>> origin/trunk
 		default:
 			return cs.FailureIconWithColor(noColor), cs.Red
 		}
 	}
 
-<<<<<<< HEAD
-	return "-", cs.Yellow
-=======
 	return "*", cs.Yellow
 }
 
@@ -831,5 +663,4 @@ func preciseAgo(now time.Time, createdAt time.Time) string {
 	}
 
 	return createdAt.Format("Jan _2, 2006")
->>>>>>> origin/trunk
 }

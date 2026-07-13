@@ -250,22 +250,7 @@ func printPrs(io *iostreams.IOStreams, totalCount int, prs ...api.PullRequest) {
 			}
 
 			if checks.Total > 0 {
-<<<<<<< HEAD
-				var summary string
-				if checks.Failing > 0 {
-					if checks.Failing == checks.Total {
-						summary = cs.Red("× All checks failing")
-					} else {
-						summary = cs.Redf("× %d/%d checks failing", checks.Failing, checks.Total)
-					}
-				} else if checks.Pending > 0 {
-					summary = cs.Yellow("- Checks pending")
-				} else if checks.Passing == checks.Total {
-					summary = cs.Green("✓ Checks passing")
-				}
-=======
 				summary := shared.PrCheckStatusSummaryWithColor(cs, checks)
->>>>>>> origin/trunk
 				fmt.Fprint(w, summary)
 			}
 

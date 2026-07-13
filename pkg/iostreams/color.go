@@ -68,8 +68,6 @@ func (c *ColorScheme) Boldf(t string, args ...interface{}) string {
 	return c.Bold(fmt.Sprintf(t, args...))
 }
 
-<<<<<<< HEAD
-=======
 func (c *ColorScheme) Muted(t string) string {
 	// Fallback to previous logic if accessible colors preview is disabled.
 	if !c.Accessible {
@@ -95,7 +93,6 @@ func (c *ColorScheme) Mutedf(t string, args ...interface{}) string {
 	return c.Muted(fmt.Sprintf(t, args...))
 }
 
->>>>>>> origin/trunk
 func (c *ColorScheme) Red(t string) string {
 	if !c.Enabled {
 		return t
@@ -129,13 +126,8 @@ func (c *ColorScheme) Greenf(t string, args ...interface{}) string {
 	return c.Green(fmt.Sprintf(t, args...))
 }
 
-<<<<<<< HEAD
-func (c *ColorScheme) Gray(t string) string {
-	if !c.enabled {
-=======
 func (c *ColorScheme) GreenBold(t string) string {
 	if !c.Enabled {
->>>>>>> origin/trunk
 		return t
 	}
 	return greenBold(t)
@@ -152,10 +144,7 @@ func (c *ColorScheme) Gray(t string) string {
 	return gray(t)
 }
 
-<<<<<<< HEAD
-=======
 // Deprecated: Use Mutedf instead for thematically contrasting color.
->>>>>>> origin/trunk
 func (c *ColorScheme) Grayf(t string, args ...interface{}) string {
 	return c.Gray(fmt.Sprintf(t, args...))
 }
@@ -218,8 +207,6 @@ func (c *ColorScheme) FailureIcon() string {
 
 func (c *ColorScheme) FailureIconWithColor(colo func(string) string) string {
 	return colo("X")
-<<<<<<< HEAD
-=======
 }
 
 func (c *ColorScheme) HighlightStart() string {
@@ -244,7 +231,6 @@ func (c *ColorScheme) Reset() string {
 	}
 
 	return ansi.Reset
->>>>>>> origin/trunk
 }
 
 func (c *ColorScheme) ColorFromString(s string) func(string) string {

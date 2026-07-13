@@ -3,16 +3,6 @@ package list
 import (
 	"bytes"
 	"fmt"
-<<<<<<< HEAD
-	"io/ioutil"
-	"net/http"
-	"testing"
-
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-=======
 	"io"
 	"net/http"
 	"testing"
@@ -22,66 +12,24 @@ import (
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/cli/cli/v2/pkg/iostreams"
->>>>>>> origin/trunk
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 )
 
-<<<<<<< HEAD
-func Test_NewCmdList(t *testing.T) {
-	tests := []struct {
-		name     string
-		cli      string
-		tty      bool
-=======
 func TestNewCmdList(t *testing.T) {
 	tests := []struct {
 		name     string
 		cli      string
->>>>>>> origin/trunk
 		wants    ListOptions
 		wantsErr bool
 	}{
 		{
-<<<<<<< HEAD
-			name: "blank tty",
-			tty:  true,
-=======
 			name: "no arguments",
->>>>>>> origin/trunk
 			wants: ListOptions{
 				Limit: defaultLimit,
 			},
 		},
 		{
-<<<<<<< HEAD
-			name: "blank nontty",
-			wants: ListOptions{
-				Limit:       defaultLimit,
-				PlainOutput: true,
-			},
-		},
-		{
-			name: "all",
-			cli:  "--all",
-			wants: ListOptions{
-				Limit:       defaultLimit,
-				PlainOutput: true,
-				All:         true,
-			},
-		},
-		{
-			name: "limit",
-			cli:  "--limit 100",
-			wants: ListOptions{
-				Limit:       100,
-				PlainOutput: true,
-			},
-		},
-		{
-			name:     "bad limit",
-			cli:      "--limit hi",
-=======
 			name: "all flag",
 			cli:  "--all",
 			wants: ListOptions{
@@ -99,26 +47,16 @@ func TestNewCmdList(t *testing.T) {
 		{
 			name:     "invalid limit flag",
 			cli:      "--limit 0",
->>>>>>> origin/trunk
 			wantsErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-<<<<<<< HEAD
-			io, _, _, _ := iostreams.Test()
-			io.SetStdinTTY(tt.tty)
-			io.SetStdoutTTY(tt.tty)
-
-			f := &cmdutil.Factory{
-				IOStreams: io,
-=======
 			ios, _, _, _ := iostreams.Test()
 
 			f := &cmdutil.Factory{
 				IOStreams: ios,
->>>>>>> origin/trunk
 			}
 
 			argv, err := shlex.Split(tt.cli)
@@ -129,18 +67,11 @@ func TestNewCmdList(t *testing.T) {
 				gotOpts = opts
 				return nil
 			})
-<<<<<<< HEAD
-			cmd.SetArgs(argv)
-			cmd.SetIn(&bytes.Buffer{})
-			cmd.SetOut(ioutil.Discard)
-			cmd.SetErr(ioutil.Discard)
-=======
 
 			cmd.SetArgs(argv)
 			cmd.SetIn(&bytes.Buffer{})
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
->>>>>>> origin/trunk
 
 			_, err = cmd.ExecuteC()
 			if tt.wantsErr {
@@ -148,74 +79,43 @@ func TestNewCmdList(t *testing.T) {
 				return
 			}
 
-<<<<<<< HEAD
-			assert.Equal(t, tt.wants.Limit, gotOpts.Limit)
-			assert.Equal(t, tt.wants.PlainOutput, gotOpts.PlainOutput)
-=======
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wants.Limit, gotOpts.Limit)
 			assert.Equal(t, tt.wants.All, gotOpts.All)
->>>>>>> origin/trunk
 		})
 	}
 }
 
 func TestListRun(t *testing.T) {
-<<<<<<< HEAD
-	workflows := []Workflow{
-		{
-			Name:  "Go",
-			State: Active,
-=======
 	workflows := []shared.Workflow{
 		{
 			Name:  "Go",
 			State: shared.Active,
->>>>>>> origin/trunk
 			ID:    707,
 		},
 		{
 			Name:  "Linter",
-<<<<<<< HEAD
-			State: Active,
-=======
 			State: shared.Active,
->>>>>>> origin/trunk
 			ID:    666,
 		},
 		{
 			Name:  "Release",
-<<<<<<< HEAD
-			State: DisabledManually,
-			ID:    451,
-		},
-	}
-	payload := WorkflowsPayload{Workflows: workflows}
-=======
 			State: shared.DisabledManually,
 			ID:    451,
 		},
 	}
 	payload := shared.WorkflowsPayload{Workflows: workflows}
->>>>>>> origin/trunk
 
 	tests := []struct {
 		name       string
 		opts       *ListOptions
-<<<<<<< HEAD
-=======
 		wantErr    bool
->>>>>>> origin/trunk
 		wantOut    string
 		wantErrOut string
 		stubs      func(*httpmock.Registry)
 		tty        bool
 	}{
 		{
-<<<<<<< HEAD
-			name: "blank tty",
-			tty:  true,
-=======
 			name: "lists worrkflows nontty",
 			opts: &ListOptions{
 				Limit: defaultLimit,
@@ -249,34 +149,12 @@ func TestListRun(t *testing.T) {
 		},
 		{
 			name: "no results nontty",
->>>>>>> origin/trunk
 			opts: &ListOptions{
 				Limit: defaultLimit,
 			},
 			stubs: func(reg *httpmock.Registry) {
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
-<<<<<<< HEAD
-					httpmock.JSONResponse(payload))
-			},
-			wantOut: "Go      active  707\nLinter  active  666\n",
-		},
-		{
-			name: "blank nontty",
-			opts: &ListOptions{
-				Limit:       defaultLimit,
-				PlainOutput: true,
-			},
-			stubs: func(reg *httpmock.Registry) {
-				reg.Register(
-					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
-					httpmock.JSONResponse(payload))
-			},
-			wantOut: "Go\tactive\t707\nLinter\tactive\t666\n",
-		},
-		{
-			name: "pagination",
-=======
 					httpmock.JSONResponse(shared.WorkflowsPayload{}),
 				)
 			},
@@ -284,19 +162,10 @@ func TestListRun(t *testing.T) {
 		},
 		{
 			name: "paginates workflows nontty",
->>>>>>> origin/trunk
 			opts: &ListOptions{
 				Limit: 101,
 			},
 			stubs: func(reg *httpmock.Registry) {
-<<<<<<< HEAD
-				workflows := []Workflow{}
-				for flowID := 0; flowID < 103; flowID++ {
-					workflows = append(workflows, Workflow{
-						ID:    flowID,
-						Name:  fmt.Sprintf("flow %d", flowID),
-						State: Active,
-=======
 				workflows := []shared.Workflow{}
 				var flowID int64
 				for flowID = 0; flowID < 103; flowID++ {
@@ -304,74 +173,26 @@ func TestListRun(t *testing.T) {
 						ID:    flowID,
 						Name:  fmt.Sprintf("flow %d", flowID),
 						State: shared.Active,
->>>>>>> origin/trunk
 					})
 				}
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
-<<<<<<< HEAD
-					httpmock.JSONResponse(WorkflowsPayload{
-=======
 					httpmock.JSONResponse(shared.WorkflowsPayload{
->>>>>>> origin/trunk
 						Workflows: workflows[0:100],
 					}))
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
-<<<<<<< HEAD
-					httpmock.JSONResponse(WorkflowsPayload{
-=======
 					httpmock.JSONResponse(shared.WorkflowsPayload{
->>>>>>> origin/trunk
 						Workflows: workflows[100:],
 					}))
 			},
 			wantOut: longOutput,
 		},
-<<<<<<< HEAD
-		/*
-			{
-				name: "no results nontty",
-				opts: &ListOptions{
-					Limit:       defaultLimit,
-					PlainOutput: true,
-				},
-				stubs: func(reg *httpmock.Registry) {
-					reg.Register(
-						httpmock.REST("GET", "TODO"),
-						httpmock.JSONResponse(shared.RunsPayload{}),
-					)
-				},
-				nontty:  true,
-				wantOut: "",
-			},
-			{
-				name: "no results tty",
-				opts: &ListOptions{
-					Limit: defaultLimit,
-				},
-				stubs: func(reg *httpmock.Registry) {
-					reg.Register(
-						httpmock.REST("GET", "TODO"),
-						httpmock.JSONResponse(shared.RunsPayload{}),
-					)
-				},
-				wantOut:    "",
-				wantErrOut: "No workflows found\n",
-			},
-
-			// TODO showing all workflows
-		*/
-=======
->>>>>>> origin/trunk
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := &httpmock.Registry{}
-<<<<<<< HEAD
-			tt.stubs(reg)
-=======
 			defer reg.Verify(t)
 			if tt.stubs == nil {
 				reg.Register(
@@ -381,34 +202,20 @@ func TestListRun(t *testing.T) {
 			} else {
 				tt.stubs(reg)
 			}
->>>>>>> origin/trunk
 
 			tt.opts.HttpClient = func() (*http.Client, error) {
 				return &http.Client{Transport: reg}, nil
 			}
 
-<<<<<<< HEAD
-			io, _, stdout, stderr := iostreams.Test()
-			io.SetStdoutTTY(tt.tty)
-			tt.opts.IO = io
-=======
 			ios, _, stdout, stderr := iostreams.Test()
 			ios.SetStdoutTTY(tt.tty)
 			tt.opts.IO = ios
 
->>>>>>> origin/trunk
 			tt.opts.BaseRepo = func() (ghrepo.Interface, error) {
 				return ghrepo.FromFullName("OWNER/REPO")
 			}
 
 			err := listRun(tt.opts)
-<<<<<<< HEAD
-			assert.NoError(t, err)
-
-			assert.Equal(t, tt.wantOut, stdout.String())
-			assert.Equal(t, tt.wantErrOut, stderr.String())
-			reg.Verify(t)
-=======
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -417,7 +224,6 @@ func TestListRun(t *testing.T) {
 
 			assert.Equal(t, tt.wantOut, stdout.String())
 			assert.Equal(t, tt.wantErrOut, stderr.String())
->>>>>>> origin/trunk
 		})
 	}
 }

@@ -2,21 +2,6 @@ package view
 
 import (
 	"bytes"
-<<<<<<< HEAD
-	"io/ioutil"
-	"net/http"
-	"testing"
-	"time"
-
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/run/shared"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
-	"github.com/google/shlex"
-	"github.com/stretchr/testify/assert"
-=======
 	"fmt"
 	"io"
 	"net/http"
@@ -40,7 +25,6 @@ import (
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
->>>>>>> origin/trunk
 )
 
 func TestNewCmdView(t *testing.T) {
@@ -63,8 +47,6 @@ func TestNewCmdView(t *testing.T) {
 			},
 		},
 		{
-<<<<<<< HEAD
-=======
 			name: "web tty",
 			tty:  true,
 			cli:  "--web",
@@ -94,7 +76,6 @@ func TestNewCmdView(t *testing.T) {
 			wantsErr: true,
 		},
 		{
->>>>>>> origin/trunk
 			name: "exit status",
 			cli:  "--exit-status 1234",
 			wants: ViewOptions{
@@ -118,8 +99,6 @@ func TestNewCmdView(t *testing.T) {
 				RunID: "1234",
 			},
 		},
-<<<<<<< HEAD
-=======
 		{
 			name: "job id passed",
 			cli:  "--job 1234",
@@ -151,19 +130,10 @@ func TestNewCmdView(t *testing.T) {
 				Attempt: 2,
 			},
 		},
->>>>>>> origin/trunk
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-<<<<<<< HEAD
-			io, _, _, _ := iostreams.Test()
-			io.SetStdinTTY(tt.tty)
-			io.SetStdoutTTY(tt.tty)
-
-			f := &cmdutil.Factory{
-				IOStreams: io,
-=======
 			ios, _, _, _ := iostreams.Test()
 			ios.SetStdinTTY(tt.tty)
 			ios.SetStdoutTTY(tt.tty)
@@ -173,7 +143,6 @@ func TestNewCmdView(t *testing.T) {
 				Config: func() (gh.Config, error) {
 					return config.NewBlankConfig(), nil
 				},
->>>>>>> origin/trunk
 			}
 
 			argv, err := shlex.Split(tt.cli)
@@ -186,13 +155,8 @@ func TestNewCmdView(t *testing.T) {
 			})
 			cmd.SetArgs(argv)
 			cmd.SetIn(&bytes.Buffer{})
-<<<<<<< HEAD
-			cmd.SetOut(ioutil.Discard)
-			cmd.SetErr(ioutil.Discard)
-=======
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
->>>>>>> origin/trunk
 
 			_, err = cmd.ExecuteC()
 			if tt.wantsErr {
@@ -206,26 +170,12 @@ func TestNewCmdView(t *testing.T) {
 			assert.Equal(t, tt.wants.Prompt, gotOpts.Prompt)
 			assert.Equal(t, tt.wants.ExitStatus, gotOpts.ExitStatus)
 			assert.Equal(t, tt.wants.Verbose, gotOpts.Verbose)
-<<<<<<< HEAD
-=======
 			assert.Equal(t, tt.wants.Attempt, gotOpts.Attempt)
->>>>>>> origin/trunk
 		})
 	}
 }
 
 func TestViewRun(t *testing.T) {
-<<<<<<< HEAD
-
-	tests := []struct {
-		name      string
-		httpStubs func(*httpmock.Registry)
-		askStubs  func(*prompt.AskStubber)
-		opts      *ViewOptions
-		tty       bool
-		wantErr   bool
-		wantOut   string
-=======
 	emptyZipArchive := createZipArchive(t, map[string]string{})
 	zipArchive := createZipArchive(t, map[string]string{
 		"0_cool job.txt": heredoc.Doc(`
@@ -295,7 +245,6 @@ func TestViewRun(t *testing.T) {
 		wantOut     string
 		browsedURL  string
 		errMsg      string
->>>>>>> origin/trunk
 	}{
 		{
 			name: "associate with PR",
@@ -309,20 +258,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
 				reg.Register(
-<<<<<<< HEAD
-					httpmock.GraphQL(`query PullRequestForRun`),
-					httpmock.StringResponse(`{"data": {
-            "repository": {
-                "pullRequests": {
-                    "nodes": [
-                        {"number": 2898,
-                         "headRepository": {
-                          "owner": {
-                           "login": "OWNER"
-                          },
-													"name": "REPO"}}
-                    ]}}}}`))
-=======
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
 					httpmock.JSONResponse(shared.TestWorkflow))
 				reg.Register(
@@ -341,7 +276,6 @@ func TestViewRun(t *testing.T) {
 						},
 												"name": "REPO"}}
 				]}}}}`))
->>>>>>> origin/trunk
 				reg.Register(
 					httpmock.REST("GET", "runs/3/jobs"),
 					httpmock.JSONResponse(shared.JobsPayload{
@@ -353,9 +287,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
 			},
-<<<<<<< HEAD
-			wantOut: "\n✓ trunk successful #2898 · 3\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job (ID 10)\n\nFor more information about a job, try: gh job view <job-id>\nview this run on GitHub: runs/3\n",
-=======
 			wantOut: "\n✓ trunk CI OWNER/REPO#2898 · 3\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job in 4m34s (ID 10)\n\nFor more information about the job, try: gh run view --job=10\nView this run on GitHub: https://github.com/runs/3\n",
 		},
 		{
@@ -401,7 +332,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.JSONResponse([]shared.Annotation{}))
 			},
 			wantOut: "\n✓ trunk CI OWNER/REPO#2898 · 3 (Attempt #3)\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job in 4m34s (ID 10)\n\nFor more information about the job, try: gh run view --job=10\nView this run on GitHub: https://github.com/runs/3/attempts/3\n",
->>>>>>> origin/trunk
 		},
 		{
 			name: "exit status, failed run",
@@ -414,15 +344,12 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/1234"),
 					httpmock.JSONResponse(shared.FailedRun))
 				reg.Register(
-<<<<<<< HEAD
-=======
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
 					httpmock.JSONResponse(shared.TestWorkflow))
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/1234/artifacts"),
 					httpmock.StringResponse(`{}`))
 				reg.Register(
->>>>>>> origin/trunk
 					httpmock.GraphQL(`query PullRequestForRun`),
 					httpmock.StringResponse(``))
 				reg.Register(
@@ -436,12 +363,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/20/annotations"),
 					httpmock.JSONResponse(shared.FailedJobAnnotations))
 			},
-<<<<<<< HEAD
-			wantOut: "\nX trunk failed · 1234\nTriggered via push about 59 minutes ago\n\nJOBS\nX sad job (ID 20)\n  ✓ barf the quux\n  X quux the barf\n\nANNOTATIONS\nX the job is sad\nsad job: blaze.py#420\n\n\nFor more information about a job, try: gh job view <job-id>\nview this run on GitHub: runs/1234\n",
-			wantErr: true,
-		},
-		{
-=======
 			wantOut: "\nX trunk CI · 1234\nTriggered via push about 59 minutes ago\n\nJOBS\nX sad job in 4m34s (ID 20)\n  ✓ barf the quux\n  X quux the barf\n\nANNOTATIONS\nX the job is sad\nsad job: blaze.py#420\n\n\nTo see what failed, try: gh run view 1234 --log-failed\nView this run on GitHub: https://github.com/runs/1234\n",
 			wantErr: true,
 		},
@@ -537,7 +458,6 @@ func TestViewRun(t *testing.T) {
 			`),
 		},
 		{
->>>>>>> origin/trunk
 			name: "exit status, successful run",
 			opts: &ViewOptions{
 				RunID:      "3",
@@ -548,12 +468,9 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
 				reg.Register(
-<<<<<<< HEAD
-=======
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3/artifacts"),
 					httpmock.StringResponse(`{}`))
 				reg.Register(
->>>>>>> origin/trunk
 					httpmock.GraphQL(`query PullRequestForRun`),
 					httpmock.StringResponse(``))
 				reg.Register(
@@ -566,10 +483,6 @@ func TestViewRun(t *testing.T) {
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
-<<<<<<< HEAD
-			},
-			wantOut: "\n✓ trunk successful · 3\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job (ID 10)\n\nFor more information about a job, try: gh job view <job-id>\nview this run on GitHub: runs/3\n",
-=======
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
 					httpmock.JSONResponse(shared.TestWorkflow))
@@ -608,7 +521,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.JSONResponse(shared.TestWorkflow))
 			},
 			wantOut: "\n✓ trunk CI · 3 (Attempt #3)\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job in 4m34s (ID 10)\n\nFor more information about the job, try: gh run view --job=10\nView this run on GitHub: https://github.com/runs/3/attempts/3\n",
->>>>>>> origin/trunk
 		},
 		{
 			name: "verbose",
@@ -623,12 +535,9 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/1234"),
 					httpmock.JSONResponse(shared.FailedRun))
 				reg.Register(
-<<<<<<< HEAD
-=======
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/1234/artifacts"),
 					httpmock.StringResponse(`{}`))
 				reg.Register(
->>>>>>> origin/trunk
 					httpmock.GraphQL(`query PullRequestForRun`),
 					httpmock.StringResponse(``))
 				reg.Register(
@@ -645,13 +554,6 @@ func TestViewRun(t *testing.T) {
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/20/annotations"),
 					httpmock.JSONResponse(shared.FailedJobAnnotations))
-<<<<<<< HEAD
-			},
-			wantOut: "\nX trunk failed · 1234\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job (ID 10)\n  ✓ fob the barz\n  ✓ barz the fob\nX sad job (ID 20)\n  ✓ barf the quux\n  X quux the barf\n\nANNOTATIONS\nX the job is sad\nsad job: blaze.py#420\n\n\nFor more information about a job, try: gh job view <job-id>\nview this run on GitHub: runs/1234\n",
-		},
-		{
-			name: "prompts for choice",
-=======
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
 					httpmock.JSONResponse(shared.TestWorkflow))
@@ -660,7 +562,6 @@ func TestViewRun(t *testing.T) {
 		},
 		{
 			name: "prompts for choice, one job",
->>>>>>> origin/trunk
 			tty:  true,
 			httpStubs: func(reg *httpmock.Registry) {
 				reg.Register(
@@ -672,12 +573,9 @@ func TestViewRun(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
 				reg.Register(
-<<<<<<< HEAD
-=======
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3/artifacts"),
 					httpmock.StringResponse(`{}`))
 				reg.Register(
->>>>>>> origin/trunk
 					httpmock.GraphQL(`query PullRequestForRun`),
 					httpmock.StringResponse(``))
 				reg.Register(
@@ -690,11 +588,6 @@ func TestViewRun(t *testing.T) {
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
-<<<<<<< HEAD
-			},
-			askStubs: func(as *prompt.AskStubber) {
-				as.StubOne(2)
-=======
 				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
 					httpmock.JSONResponse(workflowShared.WorkflowsPayload{
@@ -712,14 +605,10 @@ func TestViewRun(t *testing.T) {
 					func(_, _ string, opts []string) (int, error) {
 						return prompter.IndexFor(opts, "✓ cool commit, CI [trunk] Feb 23, 2021")
 					})
->>>>>>> origin/trunk
 			},
 			opts: &ViewOptions{
 				Prompt: true,
 			},
-<<<<<<< HEAD
-			wantOut: "\n✓ trunk successful · 3\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job (ID 10)\n\nFor more information about a job, try: gh job view <job-id>\nview this run on GitHub: runs/3\n",
-=======
 			wantOut: "\n✓ trunk CI · 3\nTriggered via push about 59 minutes ago\n\nJOBS\n✓ cool job in 4m34s (ID 10)\n\nFor more information about the job, try: gh run view --job=10\nView this run on GitHub: https://github.com/runs/3\n",
 		},
 		{
@@ -2759,7 +2648,6 @@ func TestViewRun(t *testing.T) {
 					httpmock.StatusStringResponse(403, "Forbidden"))
 			},
 			wantOut: "\nX trunk CI · 1234\nTriggered via push about 59 minutes ago\n\nJOBS\nX sad job in 4m34s (ID 20)\n  ✓ barf the quux\n  X quux the barf\n\nANNOTATIONS\nrequesting annotations returned 403 Forbidden as the token does not have sufficient permissions. Note that it is not currently possible to create a fine-grained PAT with the `checks:read` permission.\n\nTo see what failed, try: gh run view 1234 --log-failed\nView this run on GitHub: https://github.com/runs/1234\n",
->>>>>>> origin/trunk
 		},
 	}
 
@@ -2775,25 +2663,13 @@ func TestViewRun(t *testing.T) {
 			return notnow
 		}
 
-<<<<<<< HEAD
-		io, _, stdout, _ := iostreams.Test()
-		io.SetStdoutTTY(tt.tty)
-		tt.opts.IO = io
-=======
 		ios, _, stdout, _ := iostreams.Test()
 		ios.SetStdoutTTY(tt.tty)
 		tt.opts.IO = ios
->>>>>>> origin/trunk
 		tt.opts.BaseRepo = func() (ghrepo.Interface, error) {
 			return ghrepo.FromFullName("OWNER/REPO")
 		}
 
-<<<<<<< HEAD
-		as, teardown := prompt.InitAskStubber()
-		defer teardown()
-		if tt.askStubs != nil {
-			tt.askStubs(as)
-=======
 		pm := prompter.NewMockPrompter(t)
 		tt.opts.Prompter = pm
 		if tt.promptStubs != nil {
@@ -2804,19 +2680,15 @@ func TestViewRun(t *testing.T) {
 		tt.opts.Browser = browser
 		tt.opts.RunLogCache = RunLogCache{
 			cacheDir: t.TempDir(),
->>>>>>> origin/trunk
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
 			err := runView(tt.opts)
 			if tt.wantErr {
 				assert.Error(t, err)
-<<<<<<< HEAD
-=======
 				if tt.errMsg != "" {
 					assert.Equal(t, tt.errMsg, err.Error())
 				}
->>>>>>> origin/trunk
 				if !tt.opts.ExitStatus {
 					return
 				}
@@ -2825,18 +2697,13 @@ func TestViewRun(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			assert.Equal(t, tt.wantOut, stdout.String())
-<<<<<<< HEAD
-=======
 			if tt.browsedURL != "" {
 				assert.Equal(t, tt.browsedURL, browser.BrowsedURL())
 			}
->>>>>>> origin/trunk
 			reg.Verify(t)
 		})
 	}
 }
-<<<<<<< HEAD
-=======
 
 var barfTheFobLogOutput = heredoc.Doc(`
 cool job	barz the fob	log line 1
@@ -2989,4 +2856,3 @@ func TestRunLog(t *testing.T) {
 		require.Equal(t, "foo", zipReader.File[0].Name)
 	})
 }
->>>>>>> origin/trunk

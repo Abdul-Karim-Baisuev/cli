@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/run/shared"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
+	workflowShared "github.com/cli/cli/v2/pkg/cmd/workflow/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/httpmock"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 )
@@ -114,7 +115,7 @@ func TestRunView(t *testing.T) {
 		name      string
 		opts      *ViewOptions
 		httpStubs func(*httpmock.Registry)
-		askStubs  func(*prompt.AskStubber)
+		askStubs  func(*prompter.MockPrompter)
 		tty       bool
 		wantErr   bool
 		wantOut   string
@@ -152,7 +153,7 @@ func TestRunView(t *testing.T) {
 					httpmock.JSONResponse(shared.FailedJobAnnotations))
 			},
 			wantErr: true,
-			wantOut: "sad job (ID 20)\nX 59m ago in 4m34s\n\n✓ barf the quux\nX quux the barf\n\nANNOTATIONS\nX the job is sad\nblaze.py#420\n\n\nTo see the full logs for this job, try: gh job view 20 --log\nView this job on GitHub: jobs/20\n",
+			wantOut: "sad job (ID 20)\nX 59m ago in 4m34s\n\n✓ barf the quux\nX quux the barf\n\nANNOTATIONS\nX the job is sad\nblaze.py#420\n\n\nTo see the full logs for this job, try: gh job view 20 --log\nView this job on GitHub: https://github.com/jobs/20\n",
 		},
 		{
 			name: "interactive flow, multi-job",
@@ -167,8 +168,18 @@ func TestRunView(t *testing.T) {
 						WorkflowRuns: shared.TestRuns,
 					}))
 				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
+					httpmock.JSONResponse(workflowShared.WorkflowsPayload{
+						Workflows: []workflowShared.Workflow{
+							shared.TestWorkflow,
+						},
+					}))
+				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
+				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
+					httpmock.JSONResponse(shared.TestWorkflow))
 				reg.Register(
 					httpmock.REST("GET", "runs/3/jobs"),
 					httpmock.JSONResponse(shared.JobsPayload{
@@ -184,11 +195,24 @@ func TestRunView(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
 			},
-			askStubs: func(as *prompt.AskStubber) {
-				as.StubOne(2)
-				as.StubOne(0)
+			askStubs: func(pm *prompter.MockPrompter) {
+				pm.RegisterSelect("Select a workflow run", []string{
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"✓ cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+				},
+					func(_, _ string, opts []string) (int, error) { return 2, nil })
+				pm.RegisterSelect("Select a job to view", []string{"✓ cool job", "X sad job"},
+					func(_, _ string, opts []string) (int, error) { return 0, nil })
 			},
-			wantOut: "\n\ncool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: jobs/10\n",
+			wantOut: "\n\ncool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: https://github.com/jobs/10\n",
 		},
 		{
 			name: "interactive, run has only one job",
@@ -203,8 +227,18 @@ func TestRunView(t *testing.T) {
 						WorkflowRuns: shared.TestRuns,
 					}))
 				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
+					httpmock.JSONResponse(workflowShared.WorkflowsPayload{
+						Workflows: []workflowShared.Workflow{
+							shared.TestWorkflow,
+						},
+					}))
+				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
+				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
+					httpmock.JSONResponse(shared.TestWorkflow))
 				reg.Register(
 					httpmock.REST("GET", "runs/3/jobs"),
 					httpmock.JSONResponse(shared.JobsPayload{
@@ -219,10 +253,22 @@ func TestRunView(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
 			},
-			askStubs: func(as *prompt.AskStubber) {
-				as.StubOne(2)
+			askStubs: func(pm *prompter.MockPrompter) {
+				pm.RegisterSelect("Select a workflow run", []string{
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"✓ cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+				},
+					func(_, _ string, opts []string) (int, error) { return 2, nil })
 			},
-			wantOut: "\n\ncool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: jobs/10\n",
+			wantOut: "\n\ncool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: https://github.com/jobs/10\n",
 		},
 		{
 			name: "interactive with log",
@@ -238,8 +284,18 @@ func TestRunView(t *testing.T) {
 						WorkflowRuns: shared.TestRuns,
 					}))
 				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows"),
+					httpmock.JSONResponse(workflowShared.WorkflowsPayload{
+						Workflows: []workflowShared.Workflow{
+							shared.TestWorkflow,
+						},
+					}))
+				reg.Register(
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/runs/3"),
 					httpmock.JSONResponse(shared.SuccessfulRun))
+				reg.Register(
+					httpmock.REST("GET", "repos/OWNER/REPO/actions/workflows/123"),
+					httpmock.JSONResponse(shared.TestWorkflow))
 				reg.Register(
 					httpmock.REST("GET", "runs/3/jobs"),
 					httpmock.JSONResponse(shared.JobsPayload{
@@ -254,8 +310,20 @@ func TestRunView(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/actions/jobs/10/logs"),
 					httpmock.StringResponse("it's a log\nfor this job\nbeautiful log\n"))
 			},
-			askStubs: func(as *prompt.AskStubber) {
-				as.StubOne(2)
+			askStubs: func(pm *prompter.MockPrompter) {
+				pm.RegisterSelect("Select a workflow run", []string{
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"✓ cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"- cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"* cool commit, CI [trunk] Feb 23, 2021",
+					"X cool commit, CI [trunk] Feb 23, 2021",
+				},
+					func(_, _ string, opts []string) (int, error) { return 2, nil })
 			},
 			wantOut: "\n\nit's a log\nfor this job\nbeautiful log\n",
 		},
@@ -289,7 +357,7 @@ func TestRunView(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/10/annotations"),
 					httpmock.JSONResponse([]shared.Annotation{}))
 			},
-			wantOut: "cool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: jobs/10\n",
+			wantOut: "cool job (ID 10)\n✓ 59m ago in 4m34s\n\n✓ fob the barz\n✓ barz the fob\n\nTo see the full logs for this job, try: gh job view 10 --log\nView this job on GitHub: https://github.com/jobs/10\n",
 		},
 		{
 			name: "shows annotations for failed job",
@@ -304,7 +372,7 @@ func TestRunView(t *testing.T) {
 					httpmock.REST("GET", "repos/OWNER/REPO/check-runs/20/annotations"),
 					httpmock.JSONResponse(shared.FailedJobAnnotations))
 			},
-			wantOut: "sad job (ID 20)\nX 59m ago in 4m34s\n\n✓ barf the quux\nX quux the barf\n\nANNOTATIONS\nX the job is sad\nblaze.py#420\n\n\nTo see the full logs for this job, try: gh job view 20 --log\nView this job on GitHub: jobs/20\n",
+			wantOut: "sad job (ID 20)\nX 59m ago in 4m34s\n\n✓ barf the quux\nX quux the barf\n\nANNOTATIONS\nX the job is sad\nblaze.py#420\n\n\nTo see the full logs for this job, try: gh job view 20 --log\nView this job on GitHub: https://github.com/jobs/20\n",
 		},
 	}
 
@@ -327,10 +395,10 @@ func TestRunView(t *testing.T) {
 			return ghrepo.FromFullName("OWNER/REPO")
 		}
 
-		as, teardown := prompt.InitAskStubber()
-		defer teardown()
+		pm := prompter.NewMockPrompter(t)
+		tt.opts.Prompter = pm
 		if tt.askStubs != nil {
-			tt.askStubs(as)
+			tt.askStubs(pm)
 		}
 		t.Run(tt.name, func(t *testing.T) {
 			err := runView(tt.opts)

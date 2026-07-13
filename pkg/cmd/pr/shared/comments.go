@@ -100,15 +100,9 @@ func formatComment(io *iostreams.IOStreams, comment Comment, newest bool) (strin
 		fmt.Fprint(&b, formatCommentStatus(cs, comment.Status()))
 	}
 	if comment.Association() != "NONE" {
-<<<<<<< HEAD
-		fmt.Fprint(&b, cs.Boldf(" (%s)", strings.Title(strings.ToLower(comment.Association()))))
-	}
-	fmt.Fprint(&b, cs.Boldf(" • %s", utils.FuzzyAgoAbbr(time.Now(), comment.Created())))
-=======
 		fmt.Fprint(&b, cs.Boldf(" (%s)", text.Title(comment.Association())))
 	}
 	fmt.Fprint(&b, cs.Boldf(" • %s", text.FuzzyAgoAbbr(time.Now(), comment.Created())))
->>>>>>> origin/trunk
 	if comment.IsEdited() {
 		fmt.Fprint(&b, cs.Bold(" • Edited"))
 	}

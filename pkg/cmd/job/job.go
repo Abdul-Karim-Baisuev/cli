@@ -1,8 +1,8 @@
 package job
 
 import (
-	viewCmd "github.com/cli/cli/pkg/cmd/job/view"
-	"github.com/cli/cli/pkg/cmdutil"
+	viewCmd "github.com/cli/cli/v2/pkg/cmd/job/view"
+	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/spf13/cobra"
 )
 

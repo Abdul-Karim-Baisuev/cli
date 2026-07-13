@@ -6,31 +6,6 @@ import (
 	"strings"
 
 	"github.com/MakeNowJust/heredoc"
-<<<<<<< HEAD
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/context"
-	"github.com/cli/cli/internal/ghrepo"
-	actionsCmd "github.com/cli/cli/pkg/cmd/actions"
-	aliasCmd "github.com/cli/cli/pkg/cmd/alias"
-	apiCmd "github.com/cli/cli/pkg/cmd/api"
-	authCmd "github.com/cli/cli/pkg/cmd/auth"
-	completionCmd "github.com/cli/cli/pkg/cmd/completion"
-	configCmd "github.com/cli/cli/pkg/cmd/config"
-	"github.com/cli/cli/pkg/cmd/factory"
-	gistCmd "github.com/cli/cli/pkg/cmd/gist"
-	issueCmd "github.com/cli/cli/pkg/cmd/issue"
-	jobCmd "github.com/cli/cli/pkg/cmd/job"
-	prCmd "github.com/cli/cli/pkg/cmd/pr"
-	releaseCmd "github.com/cli/cli/pkg/cmd/release"
-	repoCmd "github.com/cli/cli/pkg/cmd/repo"
-	creditsCmd "github.com/cli/cli/pkg/cmd/repo/credits"
-	runCmd "github.com/cli/cli/pkg/cmd/run"
-	secretCmd "github.com/cli/cli/pkg/cmd/secret"
-	sshKeyCmd "github.com/cli/cli/pkg/cmd/ssh-key"
-	versionCmd "github.com/cli/cli/pkg/cmd/version"
-	workflowCmd "github.com/cli/cli/pkg/cmd/workflow"
-	"github.com/cli/cli/pkg/cmdutil"
-=======
 	"github.com/cli/cli/v2/internal/gh/ghtelemetry"
 	accessibilityCmd "github.com/cli/cli/v2/pkg/cmd/accessibility"
 	actionsCmd "github.com/cli/cli/v2/pkg/cmd/actions"
@@ -74,7 +49,6 @@ import (
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/extensions"
 	"github.com/google/shlex"
->>>>>>> origin/trunk
 	"github.com/spf13/cobra"
 )
 
@@ -177,25 +151,12 @@ func NewCmdRoot(f *cmdutil.Factory, telemetry ghtelemetry.CommandRecorder, versi
 	cmd.AddCommand(previewCmd.NewCmdPreview(f))
 	cmd.AddCommand(skillsCmd.NewCmdSkills(f, telemetry))
 
-<<<<<<< HEAD
-	cmd.AddCommand(actionsCmd.NewCmdActions(f))
-	cmd.AddCommand(runCmd.NewCmdRun(f))
-	cmd.AddCommand(jobCmd.NewCmdJob(f))
-	cmd.AddCommand(workflowCmd.NewCmdWorkflow(f))
-
-	// the `api` command should not inherit any extra HTTP headers
-	bareHTTPCmdFactory := *f
-	bareHTTPCmdFactory.HttpClient = bareHTTPClient(f, version)
-
-	cmd.AddCommand(apiCmd.NewCmdApi(&bareHTTPCmdFactory, nil))
-=======
 	// Root commands with standalone functionality and no subcommands
 	cmd.AddCommand(copilotCmd.NewCmdCopilot(f, telemetry, nil))
 	cmd.AddCommand(statusCmd.NewCmdStatus(f, nil))
 	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
 	cmd.AddCommand(licensesCmd.NewCmdLicenses(f))
 	cmd.AddCommand(sendTelemetryCmd.NewCmdSendTelemetry(f))
->>>>>>> origin/trunk
 
 	// below here at the commands that require the "intelligent" BaseRepo resolver
 	repoResolvingCmdFactory := *f

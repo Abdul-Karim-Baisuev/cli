@@ -1,13 +1,12 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/ghinstance"
+	"github.com/cli/cli/v2/internal/ghrepo"
 )
 
 func (c Client) JobLog(repo ghrepo.Interface, jobID string) (io.ReadCloser, error) {
@@ -24,7 +23,7 @@ func (c Client) JobLog(repo ghrepo.Interface, jobID string) (io.ReadCloser, erro
 	}
 
 	if resp.StatusCode == 404 {
-		return nil, &NotFoundError{errors.New("job not found")}
+		return nil, fmt.Errorf("job not found")
 	} else if resp.StatusCode != 200 {
 		return nil, HandleHTTPError(resp)
 	}
