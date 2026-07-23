@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/text"
-	shared "github.com/cli/cli/v2/pkg/cmd/issue/shared"
+	issueShared "github.com/cli/cli/v2/pkg/cmd/issue/shared"
 	prShared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/iostreams"
@@ -22,14 +26,26 @@ type EditOptions struct {
 	IO         *iostreams.IOStreams
 	BaseRepo   func() (ghrepo.Interface, error)
 	Prompter   prShared.EditPrompter
+	Detector   fd.Detector
 
 	DetermineEditor    func() (string, error)
 	FieldsToEditSurvey func(prShared.EditPrompter, *prShared.Editable) error
 	EditFieldsSurvey   func(prShared.EditPrompter, *prShared.Editable, string) error
-	FetchOptions       func(*api.Client, ghrepo.Interface, *prShared.Editable) error
+	FetchOptions       func(*api.Client, ghrepo.Interface, *prShared.Editable, gh.ProjectsV1Support) error
 
-	SelectorArgs []string
+	IssueNumbers []int
 	Interactive  bool
+
+	RemoveIssueType bool
+
+	Parent          string
+	RemoveParent    bool
+	AddSubIssues    []string
+	RemoveSubIssues []string
+	AddBlockedBy    []string
+	RemoveBlockedBy []string
+	AddBlocking     []string
+	RemoveBlocking  []string
 
 	prShared.Editable
 }
@@ -46,6 +62,7 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 	}
 
 	var bodyFile string
+	var removeMilestone bool
 
 	cmd := &cobra.Command{
 		Use:   "edit {<numbers> | <urls>}",
@@ -55,22 +72,47 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 
 			Editing issues' projects requires authorization with the %[1]sproject%[1]s scope.
 			To authorize, run %[1]sgh auth refresh -s project%[1]s.
+
+			The %[1]s--add-assignee%[1]s and %[1]s--remove-assignee%[1]s flags both support
+			the following special values:
+			- %[1]s@me%[1]s: assign or unassign yourself
+			- %[1]s@copilot%[1]s: assign or unassign Copilot (not supported on GitHub Enterprise Server)
 		`, "`"),
 		Example: heredoc.Doc(`
 			$ gh issue edit 23 --title "I found a bug" --body "Nothing works"
 			$ gh issue edit 23 --add-label "bug,help wanted" --remove-label "core"
 			$ gh issue edit 23 --add-assignee "@me" --remove-assignee monalisa,hubot
+			$ gh issue edit 23 --add-assignee "@copilot"
 			$ gh issue edit 23 --add-project "Roadmap" --remove-project v1,v2
 			$ gh issue edit 23 --milestone "Version 1"
+			$ gh issue edit 23 --remove-milestone
 			$ gh issue edit 23 --body-file body.txt
 			$ gh issue edit 23 34 --add-label "help wanted"
+			$ gh issue edit 23 --type Bug
+			$ gh issue edit 23 --remove-type
+			$ gh issue edit 23 --parent 100
+			$ gh issue edit 23 --remove-parent
+			$ gh issue edit 100 --add-sub-issue 123,124
+			$ gh issue edit 123 --add-blocked-by 200 --add-blocking 300,301
 		`),
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// support `-R, --repo` override
-			opts.BaseRepo = f.BaseRepo
+			issueNumbers, baseRepo, err := issueShared.ParseIssuesFromArgs(args)
+			if err != nil {
+				return err
+			}
 
-			opts.SelectorArgs = args
+			// If the args provided the base repo then use that directly.
+			if baseRepo, present := baseRepo.Value(); present {
+				opts.BaseRepo = func() (ghrepo.Interface, error) {
+					return baseRepo, nil
+				}
+			} else {
+				// support `-R, --repo` override
+				opts.BaseRepo = f.BaseRepo
+			}
+
+			opts.IssueNumbers = issueNumbers
 
 			flags := cmd.Flags()
 
@@ -95,6 +137,30 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 				}
 			}
 
+			if err := cmdutil.MutuallyExclusive(
+				"specify only one of `--milestone` or `--remove-milestone`",
+				flags.Changed("milestone"),
+				removeMilestone,
+			); err != nil {
+				return err
+			}
+
+			if err := cmdutil.MutuallyExclusive(
+				"specify only one of `--type` or `--remove-type`",
+				flags.Changed("type"),
+				opts.RemoveIssueType,
+			); err != nil {
+				return err
+			}
+
+			if err := cmdutil.MutuallyExclusive(
+				"specify only one of --parent or --remove-parent",
+				flags.Changed("parent"),
+				opts.RemoveParent,
+			); err != nil {
+				return err
+			}
+
 			if flags.Changed("title") {
 				opts.Editable.Title.Edited = true
 			}
@@ -107,11 +173,32 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 			if flags.Changed("add-project") || flags.Changed("remove-project") {
 				opts.Editable.Projects.Edited = true
 			}
-			if flags.Changed("milestone") {
+			if flags.Changed("milestone") || removeMilestone {
 				opts.Editable.Milestone.Edited = true
+
+				// Note that when `--remove-milestone` is provided, the value of
+				// `opts.Editable.Milestone.Value` will automatically be empty,
+				// which results in milestone association removal. For reference,
+				// see the `Editable.MilestoneId` method.
+			}
+			if flags.Changed("type") {
+				opts.Editable.IssueType.Edited = true
 			}
 
-			if !opts.Editable.Dirty() {
+			// hasDeferredFlags covers edit flags that flow through the
+			// deferred update path rather than the prShared.Editable struct,
+			// so they would otherwise be invisible to Editable.Dirty() below.
+			// Note that --type (set) is intentionally absent: it lights up
+			// opts.Editable.IssueType.Edited above, which Editable.Dirty()
+			// already picks up. Only --remove-type needs to be listed here.
+			hasDeferredFlags := opts.RemoveIssueType ||
+				flags.Changed("parent") || opts.RemoveParent ||
+				len(opts.AddSubIssues) > 0 || len(opts.RemoveSubIssues) > 0 ||
+				len(opts.AddBlockedBy) > 0 || len(opts.RemoveBlockedBy) > 0 ||
+				len(opts.AddBlocking) > 0 || len(opts.RemoveBlocking) > 0
+
+			// Drop into interactive mode only if the user passed no edit flags at all.
+			if !opts.Editable.Dirty() && !hasDeferredFlags {
 				opts.Interactive = true
 			}
 
@@ -119,8 +206,12 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 				return cmdutil.FlagErrorf("field to edit flag required when not running interactively")
 			}
 
-			if opts.Interactive && len(opts.SelectorArgs) > 1 {
+			if opts.Interactive && len(opts.IssueNumbers) > 1 {
 				return cmdutil.FlagErrorf("multiple issues cannot be edited interactively")
+			}
+
+			if len(opts.IssueNumbers) > 1 && len(opts.AddSubIssues) > 0 {
+				return cmdutil.FlagErrorf("`--add-sub-issue` cannot be used when editing multiple issues")
 			}
 
 			if runF != nil {
@@ -134,13 +225,24 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 	cmd.Flags().StringVarP(&opts.Editable.Title.Value, "title", "t", "", "Set the new title.")
 	cmd.Flags().StringVarP(&opts.Editable.Body.Value, "body", "b", "", "Set the new body.")
 	cmd.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read body text from `file` (use \"-\" to read from standard input)")
-	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Add, "add-assignee", nil, "Add assigned users by their `login`. Use \"@me\" to assign yourself.")
-	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Remove, "remove-assignee", nil, "Remove assigned users by their `login`. Use \"@me\" to unassign yourself.")
+	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Add, "add-assignee", nil, "Add assigned users by their `login`. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.")
+	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Remove, "remove-assignee", nil, "Remove assigned users by their `login`. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.")
 	cmd.Flags().StringSliceVar(&opts.Editable.Labels.Add, "add-label", nil, "Add labels by `name`")
 	cmd.Flags().StringSliceVar(&opts.Editable.Labels.Remove, "remove-label", nil, "Remove labels by `name`")
-	cmd.Flags().StringSliceVar(&opts.Editable.Projects.Add, "add-project", nil, "Add the issue to projects by `name`")
-	cmd.Flags().StringSliceVar(&opts.Editable.Projects.Remove, "remove-project", nil, "Remove the issue from projects by `name`")
+	cmd.Flags().StringSliceVar(&opts.Editable.Projects.Add, "add-project", nil, "Add the issue to projects by `title`")
+	cmd.Flags().StringSliceVar(&opts.Editable.Projects.Remove, "remove-project", nil, "Remove the issue from projects by `title`")
 	cmd.Flags().StringVarP(&opts.Editable.Milestone.Value, "milestone", "m", "", "Edit the milestone the issue belongs to by `name`")
+	cmd.Flags().BoolVar(&removeMilestone, "remove-milestone", false, "Remove the milestone association from the issue")
+	cmd.Flags().StringVar(&opts.Editable.IssueType.Value, "type", "", "Set the issue type by `name`")
+	cmd.Flags().BoolVar(&opts.RemoveIssueType, "remove-type", false, "Remove the issue type from the issue")
+	cmd.Flags().StringVar(&opts.Parent, "parent", "", "Set the parent issue by `number` or URL")
+	cmd.Flags().BoolVar(&opts.RemoveParent, "remove-parent", false, "Remove the parent issue")
+	cmd.Flags().StringSliceVar(&opts.AddSubIssues, "add-sub-issue", nil, "Add sub-issues by `number` or URL")
+	cmd.Flags().StringSliceVar(&opts.RemoveSubIssues, "remove-sub-issue", nil, "Remove sub-issues by `number` or URL")
+	cmd.Flags().StringSliceVar(&opts.AddBlockedBy, "add-blocked-by", nil, "Add 'blocked by' relationships by issue `number` or URL")
+	cmd.Flags().StringSliceVar(&opts.RemoveBlockedBy, "remove-blocked-by", nil, "Remove 'blocked by' relationships by issue `number` or URL")
+	cmd.Flags().StringSliceVar(&opts.AddBlocking, "add-blocking", nil, "Add 'blocking' relationships by issue `number` or URL")
+	cmd.Flags().StringSliceVar(&opts.RemoveBlocking, "remove-blocking", nil, "Remove 'blocking' relationships by issue `number` or URL")
 
 	return cmd
 }
@@ -151,8 +253,14 @@ func editRun(opts *EditOptions) error {
 		return err
 	}
 
+	baseRepo, err := opts.BaseRepo()
+	if err != nil {
+		return err
+	}
+
 	// Prompt the user which fields they'd like to edit.
 	editable := opts.Editable
+	editable.IssueType.Selectable = true
 	if opts.Interactive {
 		err = opts.FieldsToEditSurvey(opts.Prompter, &editable)
 		if err != nil {
@@ -160,31 +268,66 @@ func editRun(opts *EditOptions) error {
 		}
 	}
 
+	if opts.Detector == nil {
+		cachedClient := api.NewCachedHTTPClient(httpClient, time.Hour*24)
+		opts.Detector = fd.NewDetector(cachedClient, baseRepo.RepoHost())
+	}
+
+	issueFeatures, err := opts.Detector.IssueFeatures()
+	if err != nil {
+		return err
+	}
+
 	lookupFields := []string{"id", "number", "title", "body", "url"}
 	if editable.Assignees.Edited {
-		lookupFields = append(lookupFields, "assignees")
+		// TODO ApiActorsSupported
+		if issueFeatures.ApiActorsSupported {
+			editable.ApiActorsSupported = true
+			lookupFields = append(lookupFields, "assignedActors")
+		} else {
+			lookupFields = append(lookupFields, "assignees")
+		}
 	}
 	if editable.Labels.Edited {
 		lookupFields = append(lookupFields, "labels")
 	}
 	if editable.Projects.Edited {
-		lookupFields = append(lookupFields, "projectCards")
+		// TODO projectsV1Deprecation
+		// Remove this section as we should no longer add projectCards
+		projectsV1Support := opts.Detector.ProjectsV1()
+		if projectsV1Support == gh.ProjectsV1Supported {
+			lookupFields = append(lookupFields, "projectCards")
+		}
+
 		lookupFields = append(lookupFields, "projectItems")
 	}
 	if editable.Milestone.Edited {
 		lookupFields = append(lookupFields, "milestone")
 	}
+	if editable.IssueType.Edited {
+		lookupFields = append(lookupFields, "issueType")
+	}
+	if opts.Parent != "" || opts.RemoveParent {
+		lookupFields = append(lookupFields, "parent")
+	}
 
 	// Get all specified issues and make sure they are within the same repo.
-	issues, repo, err := shared.IssuesFromArgsWithFields(httpClient, opts.BaseRepo, opts.SelectorArgs, lookupFields)
+	issues, err := issueShared.FindIssuesOrPRs(httpClient, baseRepo, opts.IssueNumbers, lookupFields)
 	if err != nil {
 		return err
 	}
 
 	// Fetch editable shared fields once for all issues.
 	apiClient := api.NewClientFromHTTP(httpClient)
+
+	// Wire up search function for assignees when ApiActorsSupported is available.
+	// Interactive mode only supports a single issue, so we use its ID for the search query.
+	if issueFeatures.ApiActorsSupported && opts.Interactive && len(issues) == 1 {
+		editable.AssigneeSearchFunc = prShared.AssigneeSearchFunc(apiClient, baseRepo, issues[0].ID)
+	}
+
 	opts.IO.StartProgressIndicatorWithLabel("Fetching repository information")
-	err = opts.FetchOptions(apiClient, repo, &editable)
+	err = opts.FetchOptions(apiClient, baseRepo, &editable, opts.Detector.ProjectsV1())
 	opts.IO.StopProgressIndicator()
 	if err != nil {
 		return err
@@ -200,13 +343,31 @@ func editRun(opts *EditOptions) error {
 		opts.IO.StartProgressIndicatorWithLabel(fmt.Sprintf("Updating %d issues", len(issues)))
 	}
 
+	// Resolve issue type ID up front for non-interactive mode; interactive
+	// mode resolves after the survey sets the value (inside the loop).
+	var issueTypeID string
+	if !opts.Interactive {
+		issueTypeID, err = lookupIssueTypeID(&editable)
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, issue := range issues {
 		// Copy variables to capture in the go routine below.
 		editable := editable.Clone()
 
 		editable.Title.Default = issue.Title
 		editable.Body.Default = issue.Body
-		editable.Assignees.Default = issue.Assignees.Logins()
+		// We use Actors as the default assignees if Actors are assignable
+		// on this GitHub host.
+		// TODO ApiActorsSupported
+		if editable.ApiActorsSupported {
+			editable.Assignees.Default = issue.AssignedActors.DisplayNames()
+			editable.Assignees.DefaultLogins = issue.AssignedActors.Logins()
+		} else {
+			editable.Assignees.Default = issue.Assignees.Logins()
+		}
 		editable.Labels.Default = issue.Labels.Names()
 		editable.Projects.Default = append(issue.ProjectCards.ProjectNames(), issue.ProjectItems.ProjectTitles()...)
 		projectItems := map[string]string{}
@@ -216,6 +377,9 @@ func editRun(opts *EditOptions) error {
 		editable.Projects.ProjectItems = projectItems
 		if issue.Milestone != nil {
 			editable.Milestone.Default = issue.Milestone.Title
+		}
+		if issue.IssueType != nil {
+			editable.IssueType.Default = issue.IssueType.Name
 		}
 
 		// Allow interactive prompts for one issue; failed earlier if multiple issues specified.
@@ -228,15 +392,28 @@ func editRun(opts *EditOptions) error {
 			if err != nil {
 				return err
 			}
+			issueTypeID, err = lookupIssueTypeID(&editable)
+			if err != nil {
+				return err
+			}
 		}
 
 		g.Add(1)
 		go func(issue *api.Issue) {
 			defer g.Done()
 
-			err := prShared.UpdateIssue(httpClient, repo, issue.ID, issue.IsPullRequest(), editable)
+			if err := prShared.UpdateIssue(httpClient, baseRepo, issue.ID, issue.IsPullRequest(), editable); err != nil {
+				failedIssueChan <- fmt.Sprintf("failed to update %s: %s", issue.URL, err)
+				return
+			}
+
+			mutations, err := deferredUpdateIssueOptions(apiClient, baseRepo, issue, opts, issueTypeID)
 			if err != nil {
 				failedIssueChan <- fmt.Sprintf("failed to update %s: %s", issue.URL, err)
+				return
+			}
+			if err := api.DeferredUpdateIssue(apiClient, mutations); err != nil {
+				failedIssueChan <- fmt.Sprintf("failed to update %s:\n%s", issue.URL, err)
 				return
 			}
 
@@ -278,4 +455,88 @@ func editRun(opts *EditOptions) error {
 	}
 
 	return nil
+}
+
+// lookupIssueTypeID resolves the chosen issue type to its node ID using the
+// map populated by FetchOptions.
+func lookupIssueTypeID(editable *prShared.Editable) (string, error) {
+	if !editable.IssueType.Edited || editable.IssueType.Value == "" {
+		return "", nil
+	}
+	id, ok := editable.IssueTypeNameToID[editable.IssueType.Value]
+	if !ok {
+		return "", fmt.Errorf("type %q not found; available types: %s",
+			editable.IssueType.Value,
+			strings.Join(editable.IssueType.Options, ", "))
+	}
+	return id, nil
+}
+
+func deferredUpdateIssueOptions(client *api.Client, baseRepo ghrepo.Interface, issue *api.Issue, editOpts *EditOptions, issueTypeID string) (api.DeferredUpdateIssueOptions, error) {
+	updateOpts := api.DeferredUpdateIssueOptions{
+		IssueID:               issue.ID,
+		Hostname:              baseRepo.RepoHost(),
+		IssueTypeID:           issueTypeID,
+		RemoveIssueType:       editOpts.RemoveIssueType,
+		ReplaceExistingParent: true,
+	}
+
+	if editOpts.RemoveParent {
+		if issue.Parent != nil {
+			updateOpts.RemoveParentID = issue.Parent.ID
+		}
+	} else if editOpts.Parent != "" {
+		parentID, err := issueShared.ResolveIssueRef(client, baseRepo, editOpts.Parent)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --parent reference %q: %w", editOpts.Parent, err)
+		}
+		updateOpts.ParentID = parentID
+	}
+
+	for _, ref := range editOpts.AddSubIssues {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --add-sub-issue reference %q: %w", ref, err)
+		}
+		updateOpts.AddSubIssueIDs = append(updateOpts.AddSubIssueIDs, id)
+	}
+	for _, ref := range editOpts.RemoveSubIssues {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --remove-sub-issue reference %q: %w", ref, err)
+		}
+		updateOpts.RemoveSubIssueIDs = append(updateOpts.RemoveSubIssueIDs, id)
+	}
+
+	for _, ref := range editOpts.AddBlockedBy {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --add-blocked-by reference %q: %w", ref, err)
+		}
+		updateOpts.AddBlockedByIDs = append(updateOpts.AddBlockedByIDs, id)
+	}
+	for _, ref := range editOpts.RemoveBlockedBy {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --remove-blocked-by reference %q: %w", ref, err)
+		}
+		updateOpts.RemoveBlockedByIDs = append(updateOpts.RemoveBlockedByIDs, id)
+	}
+
+	for _, ref := range editOpts.AddBlocking {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --add-blocking reference %q: %w", ref, err)
+		}
+		updateOpts.AddBlockingIDs = append(updateOpts.AddBlockingIDs, id)
+	}
+	for _, ref := range editOpts.RemoveBlocking {
+		id, err := issueShared.ResolveIssueRef(client, baseRepo, ref)
+		if err != nil {
+			return api.DeferredUpdateIssueOptions{}, fmt.Errorf("resolving --remove-blocking reference %q: %w", ref, err)
+		}
+		updateOpts.RemoveBlockingIDs = append(updateOpts.RemoveBlockingIDs, id)
+	}
+
+	return updateOpts, nil
 }

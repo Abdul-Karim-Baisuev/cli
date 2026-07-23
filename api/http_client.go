@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cli/cli/v2/internal/ghinstance"
+	"github.com/cli/cli/v2/internal/gh/ghtelemetry"
 	"github.com/cli/cli/v2/utils"
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
+	ghauth "github.com/cli/go-gh/v2/pkg/auth"
 )
 
 type tokenGetter interface {
@@ -17,22 +18,26 @@ type tokenGetter interface {
 }
 
 type HTTPClientOptions struct {
-	AppVersion     string
-	CacheTTL       time.Duration
-	Config         tokenGetter
-	EnableCache    bool
-	Log            io.Writer
-	LogColorize    bool
-	LogVerboseHTTP bool
+	AppVersion         string
+	InvokingAgent      string
+	CacheTTL           time.Duration
+	Config             tokenGetter
+	EnableCache        bool
+	Log                io.Writer
+	LogColorize        bool
+	LogVerboseHTTP     bool
+	SkipDefaultHeaders bool
+	TelemetryDisabler  ghtelemetry.Disabler
 }
 
 func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 	// Provide invalid host, and token values so gh.HTTPClient will not automatically resolve them.
 	// The real host and token are inserted at request time.
 	clientOpts := ghAPI.ClientOptions{
-		Host:         "none",
-		AuthToken:    "none",
-		LogIgnoreEnv: true,
+		Host:               "none",
+		AuthToken:          "none",
+		LogIgnoreEnv:       true,
+		SkipDefaultHeaders: opts.SkipDefaultHeaders,
 	}
 
 	debugEnabled, debugValue := utils.IsDebugEnabled()
@@ -46,8 +51,14 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 		clientOpts.LogVerboseHTTP = opts.LogVerboseHTTP
 	}
 
+	ua := fmt.Sprintf("GitHub CLI %s", opts.AppVersion)
+	if opts.InvokingAgent != "" {
+		ua = fmt.Sprintf("%s Agent/%s", ua, opts.InvokingAgent)
+	}
+
 	headers := map[string]string{
-		userAgent: fmt.Sprintf("GitHub CLI %s", opts.AppVersion),
+		userAgent:  ua,
+		apiVersion: apiVersionValue,
 	}
 	clientOpts.Headers = headers
 
@@ -65,6 +76,57 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 		client.Transport = AddAuthTokenHeader(client.Transport, opts.Config)
 	}
 
+	if opts.TelemetryDisabler != nil {
+		client.Transport = telemetryDisablerTransport{
+			wrappedTransport:  client.Transport,
+			telemetryDisabler: opts.TelemetryDisabler,
+		}
+	}
+
+	return client, nil
+}
+
+// ExternalHTTPClientOptions holds options for creating an external HTTP client.
+type ExternalHTTPClientOptions struct {
+	AppVersion  string
+	Log         io.Writer
+	LogColorize bool
+	Transport   http.RoundTripper
+}
+
+// NewExternalHTTPClient creates an HTTP client for talking to non-GitHub hosts.
+// It includes debug logging and a User-Agent header but does not attach any
+// authentication tokens or GitHub-specific headers.
+func NewExternalHTTPClient(opts ExternalHTTPClientOptions) (*http.Client, error) {
+	clientOpts := ghAPI.ClientOptions{
+		Host:               "none",
+		AuthToken:          "none",
+		LogIgnoreEnv:       true,
+		SkipDefaultHeaders: true,
+		Transport:          opts.Transport,
+	}
+
+	debugEnabled, debugValue := utils.IsDebugEnabled()
+	logVerboseHTTP := false
+	if strings.Contains(debugValue, "api") {
+		logVerboseHTTP = true
+	}
+
+	if logVerboseHTTP || debugEnabled {
+		clientOpts.Log = opts.Log
+		clientOpts.LogColorize = opts.LogColorize
+		clientOpts.LogVerboseHTTP = logVerboseHTTP
+	}
+
+	clientOpts.Headers = map[string]string{
+		userAgent: fmt.Sprintf("GitHub CLI %s", opts.AppVersion),
+	}
+
+	client, err := ghAPI.NewHTTPClient(clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
 	return client, nil
 }
 
@@ -74,7 +136,7 @@ func NewCachedHTTPClient(httpClient *http.Client, ttl time.Duration) *http.Clien
 	return &newClient
 }
 
-// AddCacheTTLHeader adds an header to the request telling the cache that the request
+// AddCacheTTLHeader adds a header to the request telling the cache that the request
 // should be cached for a specified amount of time.
 func AddCacheTTLHeader(rt http.RoundTripper, ttl time.Duration) http.RoundTripper {
 	return &funcTripper{roundTrip: func(req *http.Request) (*http.Response, error) {
@@ -86,7 +148,7 @@ func AddCacheTTLHeader(rt http.RoundTripper, ttl time.Duration) http.RoundTrippe
 	}}
 }
 
-// AddAuthToken adds an authentication token header for the host specified by the request.
+// AddAuthTokenHeader adds an authentication token header for the host specified by the request.
 func AddAuthTokenHeader(rt http.RoundTripper, cfg tokenGetter) http.RoundTripper {
 	return &funcTripper{roundTrip: func(req *http.Request) (*http.Response, error) {
 		// If the header is already set in the request, don't overwrite it.
@@ -98,7 +160,7 @@ func AddAuthTokenHeader(rt http.RoundTripper, cfg tokenGetter) http.RoundTripper
 			// Only set header if an initial request or redirect request to the same host as the initial request.
 			// If the host has changed during a redirect do not add the authentication token header.
 			if !redirectHostnameChange {
-				hostname := ghinstance.NormalizeHostname(getHost(req))
+				hostname := ghauth.NormalizeHostname(getHost(req))
 				if token, _ := cfg.ActiveToken(hostname); token != "" {
 					req.Header.Set(authorization, fmt.Sprintf("token %s", token))
 				}
@@ -137,4 +199,16 @@ func getHost(r *http.Request) string {
 		return r.Host
 	}
 	return r.URL.Host
+}
+
+type telemetryDisablerTransport struct {
+	wrappedTransport  http.RoundTripper
+	telemetryDisabler ghtelemetry.Disabler
+}
+
+func (t telemetryDisablerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if ghauth.IsEnterprise(getHost(req)) {
+		t.telemetryDisabler.Disable()
+	}
+	return t.wrappedTransport.RoundTrip(req)
 }

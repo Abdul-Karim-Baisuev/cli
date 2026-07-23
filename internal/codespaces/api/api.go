@@ -60,10 +60,11 @@ const (
 
 // API is the interface to the codespace service.
 type API struct {
-	client       func() (*http.Client, error)
-	githubAPI    string
-	githubServer string
-	retryBackoff time.Duration
+	client         func() (*http.Client, error)
+	externalClient func() (*http.Client, error)
+	githubAPI      string
+	githubServer   string
+	retryBackoff   time.Duration
 }
 
 // New creates a new API client connecting to the configured endpoints with the HTTP client.
@@ -93,10 +94,11 @@ func New(f *cmdutil.Factory) *API {
 	}
 
 	return &API{
-		client:       f.HttpClient,
-		githubAPI:    strings.TrimSuffix(apiURL, "/"),
-		githubServer: strings.TrimSuffix(serverURL, "/"),
-		retryBackoff: 100 * time.Millisecond,
+		client:         f.HttpClient,
+		externalClient: f.ExternalHttpClient,
+		githubAPI:      strings.TrimSuffix(apiURL, "/"),
+		githubServer:   strings.TrimSuffix(serverURL, "/"),
+		retryBackoff:   100 * time.Millisecond,
 	}
 }
 
@@ -240,6 +242,8 @@ const (
 	CodespaceStateAvailable = "Available"
 	// CodespaceStateShutdown is the state for a shutdown codespace environment.
 	CodespaceStateShutdown = "Shutdown"
+	// CodespaceStateShuttingDown is the state for a shutting down codespace environment.
+	CodespaceStateShuttingDown = "ShuttingDown"
 	// CodespaceStateStarting is the state for a starting codespace environment.
 	CodespaceStateStarting = "Starting"
 	// CodespaceStateRebuilding is the state for a rebuilding codespace environment.
@@ -1212,12 +1216,8 @@ func (a *API) withRetry(f func() (*http.Response, error)) (*http.Response, error
 	}, backoff.WithMaxRetries(bo, 3))
 }
 
-// HTTPClient returns the HTTP client used to make requests to the API.
-func (a *API) HTTPClient() (*http.Client, error) {
-	httpClient, err := a.client()
-	if err != nil {
-		return nil, err
-	}
-
-	return httpClient, nil
+// ExternalHTTPClient returns an HTTP client for requests to non-GitHub hosts.
+// It must not carry GitHub authentication credentials.
+func (a *API) ExternalHTTPClient() (*http.Client, error) {
+	return a.externalClient()
 }

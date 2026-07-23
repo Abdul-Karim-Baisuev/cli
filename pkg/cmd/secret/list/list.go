@@ -3,13 +3,16 @@ package list
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
-	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
 	"github.com/cli/cli/v2/internal/tableprinter"
 	"github.com/cli/cli/v2/pkg/cmd/secret/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
@@ -20,10 +23,12 @@ import (
 type ListOptions struct {
 	HttpClient func() (*http.Client, error)
 	IO         *iostreams.IOStreams
-	Config     func() (config.Config, error)
+	Config     func() (gh.Config, error)
 	BaseRepo   func() (ghrepo.Interface, error)
-	Now        func() time.Time
-	Exporter   cmdutil.Exporter
+	Prompter   prompter.Prompter
+
+	Now      func() time.Time
+	Exporter cmdutil.Exporter
 
 	OrgName     string
 	EnvName     string
@@ -39,12 +44,15 @@ var secretFields = []string{
 	"numSelectedRepos",
 }
 
+const fieldNumSelectedRepos = "numSelectedRepos"
+
 func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Command {
 	opts := &ListOptions{
 		IO:         f.IOStreams,
 		Config:     f.Config,
 		HttpClient: f.HttpClient,
 		Now:        time.Now,
+		Prompter:   f.Prompter,
 	}
 
 	cmd := &cobra.Command{
@@ -52,16 +60,28 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 		Short: "List secrets",
 		Long: heredoc.Doc(`
 			List secrets on one of the following levels:
-			- repository (default): available to GitHub Actions runs or Dependabot in a repository
+			- repository (default): available to GitHub Actions runs, Agents sessions, or Dependabot in a repository
 			- environment: available to GitHub Actions runs for a deployment environment in a repository
-			- organization: available to GitHub Actions runs, Dependabot, or Codespaces within an organization
+			- organization: available to GitHub Actions runs, Agents sessions, Dependabot, or Codespaces within an organization
 			- user: available to Codespaces for your user
 		`),
 		Aliases: []string{"ls"},
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// support `-R, --repo` override
+			// If the user specified a repo directly, then we're using the OverrideBaseRepoFunc set by EnableRepoOverride
+			// So there's no reason to use the specialised BaseRepoFunc that requires remote disambiguation.
 			opts.BaseRepo = f.BaseRepo
+			isRepoUserProvided := cmd.Flags().Changed("repo") || os.Getenv("GH_REPO") != ""
+			if !isRepoUserProvided {
+				// If they haven't specified a repo directly, then we will wrap the BaseRepoFunc in one that errors if
+				// there might be multiple valid remotes.
+				opts.BaseRepo = shared.RequireNoAmbiguityBaseRepoFunc(opts.BaseRepo, f.Remotes)
+				// But if we are able to prompt, then we will wrap that up in a BaseRepoFunc that can prompt the user to
+				// resolve the ambiguity.
+				if opts.IO.CanPrompt() {
+					opts.BaseRepo = shared.PromptWhenAmbiguousBaseRepoFunc(opts.BaseRepo, f.IOStreams, f.Prompter)
+				}
+			}
 
 			if err := cmdutil.MutuallyExclusive("specify only one of `--org`, `--env`, or `--user`", opts.OrgName != "", opts.EnvName != "", opts.UserSecrets); err != nil {
 				return err
@@ -78,7 +98,7 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 	cmd.Flags().StringVarP(&opts.OrgName, "org", "o", "", "List secrets for an organization")
 	cmd.Flags().StringVarP(&opts.EnvName, "env", "e", "", "List secrets for an environment")
 	cmd.Flags().BoolVarP(&opts.UserSecrets, "user", "u", false, "List a secret for your user")
-	cmdutil.StringEnumFlag(cmd, &opts.Application, "app", "a", "", []string{shared.Actions, shared.Codespaces, shared.Dependabot}, "List secrets for a specific application")
+	cmdutil.StringEnumFlag(cmd, &opts.Application, "app", "a", "", []string{shared.Actions, shared.Agents, shared.Codespaces, shared.Dependabot}, "List secrets for a specific application")
 	cmdutil.AddJSONFlags(cmd, &opts.Exporter, secretFields)
 	return cmd
 }
@@ -114,16 +134,28 @@ func listRun(opts *ListOptions) error {
 		return fmt.Errorf("%s secrets are not supported for %s", secretEntity, secretApp)
 	}
 
-	var secrets []Secret
+	// Since populating the `NumSelectedRepos` field costs further API requests
+	// (one per secret), it's important to avoid extra calls when the output will
+	// not present the field's value. So, we should only populate this field in
+	// these cases:
+	//  1. The command is run in the TTY mode without the `--json <fields>` option.
+	//  2. The command is run with `--json <fields>` option, and `numSelectedRepos`
+	//     is among the selected fields. In this case, TTY mode is irrelevant.
 	showSelectedRepoInfo := opts.IO.IsStdoutTTY()
+	if opts.Exporter != nil {
+		// Note that if there's an exporter set, then we don't mind the TTY mode
+		// because we just have to populate the requested fields.
+		showSelectedRepoInfo = slices.Contains(opts.Exporter.Fields(), fieldNumSelectedRepos)
+	}
 
+	var secrets []Secret
 	switch secretEntity {
 	case shared.Repository:
 		secrets, err = getRepoSecrets(client, baseRepo, secretApp)
 	case shared.Environment:
 		secrets, err = getEnvSecrets(client, baseRepo, envName)
 	case shared.Organization, shared.User:
-		var cfg config.Config
+		var cfg gh.Config
 		var host string
 
 		cfg, err = opts.Config()

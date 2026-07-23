@@ -82,7 +82,7 @@ type apiClient interface {
 	ListDevContainers(ctx context.Context, repoID int, branch string, limit int) (devcontainers []api.DevContainerEntry, err error)
 	GetCodespaceRepoSuggestions(ctx context.Context, partialSearch string, params api.RepoSearchParameters) ([]string, error)
 	GetCodespaceBillableOwner(ctx context.Context, nwo string) (*api.User, error)
-	HTTPClient() (*http.Client, error)
+	ExternalHTTPClient() (*http.Client, error)
 }
 
 var errNoCodespaces = errors.New("you have no codespaces")
@@ -198,7 +198,7 @@ func (c codespace) displayName(includeOwner bool) string {
 		displayName = c.Name
 	}
 
-	description := fmt.Sprintf("%s (%s): %s", c.Repository.FullName, branch, displayName)
+	description := fmt.Sprintf("%s [%s]: %s", c.Repository.FullName, branch, displayName)
 
 	if includeOwner {
 		description = fmt.Sprintf("%-15s %s", c.Owner.Login, description)

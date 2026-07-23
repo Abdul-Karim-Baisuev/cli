@@ -14,13 +14,11 @@ import (
 	"github.com/cli/cli/v2/pkg/cmd/attestation/test"
 	"github.com/cli/cli/v2/pkg/cmd/attestation/verification"
 	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/spf13/cobra"
 
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/in-toto/in-toto-golang/in_toto"
-	"github.com/sigstore/sigstore-go/pkg/verify"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,13 +35,27 @@ var (
 
 func TestNewVerifyCmd(t *testing.T) {
 	testIO, _, _, _ := iostreams.Test()
+	var testReg httpmock.Registry
+	var metaResp = api.MetaResponse{
+		Domains: api.Domain{
+			ArtifactAttestations: api.ArtifactAttestations{
+				TrustDomain: "foo",
+			},
+		},
+	}
+	testReg.Register(httpmock.REST(http.MethodGet, "meta"),
+		httpmock.StatusJSONResponse(200, &metaResp))
+
 	f := &cmdutil.Factory{
 		IOStreams: testIO,
 		HttpClient: func() (*http.Client, error) {
-			reg := &httpmock.Registry{}
+			reg := &testReg
 			client := &http.Client{}
 			httpmock.ReplaceTripper(client, reg)
 			return client, nil
+		},
+		ExternalHttpClient: func() (*http.Client, error) {
+			return nil, nil
 		},
 	}
 
@@ -58,12 +70,15 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Invalid digest-alg flag",
 			cli:  fmt.Sprintf("%s --bundle %s --digest-alg sha384 --owner sigstore", artifactPath, bundlePath),
 			wants: Options{
-				ArtifactPath:    test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
-				BundlePath:      test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
-				DigestAlgorithm: "sha384",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				BundlePath:       test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
+				DigestAlgorithm:  "sha384",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: true,
 		},
@@ -71,27 +86,63 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Use default digest-alg value",
 			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore", artifactPath, bundlePath),
 			wants: Options{
-				ArtifactPath:    test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
-				BundlePath:      test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
-				DigestAlgorithm: "sha256",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				BundlePath:       test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: false,
+		},
+		{
+			name: "Custom host",
+			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore --hostname foo.ghe.com", artifactPath, bundlePath),
+			wants: Options{
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				BundlePath:       test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
+				DigestAlgorithm:  "sha256",
+				Hostname:         "foo.ghe.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
+			},
+			wantsErr: false,
+		},
+		{
+			name: "Invalid custom host",
+			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore --hostname foo.bar.com", artifactPath, bundlePath),
+			wants: Options{
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				BundlePath:       test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
+				DigestAlgorithm:  "sha256",
+				Hostname:         "foo.ghe.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
+			},
+			wantsErr: true,
 		},
 		{
 			name: "Use custom digest-alg value",
 			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore --digest-alg sha512", artifactPath, bundlePath),
 			wants: Options{
-				ArtifactPath:    test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
-				BundlePath:      test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
-				DigestAlgorithm: "sha512",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				BundlePath:       test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0-bundle.json"),
+				DigestAlgorithm:  "sha512",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: false,
 		},
@@ -99,12 +150,15 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Missing owner and repo flags",
 			cli:  artifactPath,
 			wants: Options{
-				ArtifactPath:    test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
-				DigestAlgorithm: "sha256",
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				Limit:           30,
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     test.NormalizeRelativePath("../test/data/sigstore-js-2.1.0.tgz"),
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SANRegex:         "(?i)^https://github.com/sigstore/",
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: true,
 		},
@@ -112,12 +166,15 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Has both owner and repo flags",
 			cli:  fmt.Sprintf("%s --owner sigstore --repo sigstore/sigstore-js", artifactPath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				DigestAlgorithm: "sha256",
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				Repo:            "sigstore/sigstore-js",
-				Limit:           30,
+				ArtifactPath:     artifactPath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				Repo:             "sigstore/sigstore-js",
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: true,
 		},
@@ -125,12 +182,14 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Uses default limit flag",
 			cli:  fmt.Sprintf("%s --owner sigstore", artifactPath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				DigestAlgorithm: "sha256",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     artifactPath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: false,
 		},
@@ -138,12 +197,14 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Uses custom limit flag",
 			cli:  fmt.Sprintf("%s --owner sigstore --limit 101", artifactPath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				DigestAlgorithm: "sha256",
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				Limit:           101,
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     artifactPath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            101,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: false,
 		},
@@ -151,12 +212,15 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Uses invalid limit flag",
 			cli:  fmt.Sprintf("%s --owner sigstore --limit 0", artifactPath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				DigestAlgorithm: "sha256",
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				Limit:           0,
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     artifactPath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            0,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SANRegex:         "(?i)^https://github.com/sigstore/",
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: true,
 		},
@@ -164,13 +228,16 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Has both cert-identity and cert-identity-regex flags",
 			cli:  fmt.Sprintf("%s --owner sigstore --cert-identity https://github.com/sigstore/ --cert-identity-regex ^https://github.com/sigstore/", artifactPath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				DigestAlgorithm: "sha256",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				SAN:             "https://github.com/sigstore/",
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     artifactPath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SAN:              "https://github.com/sigstore/",
+				SANRegex:         "(?i)^https://github.com/sigstore/",
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsErr: true,
 		},
@@ -178,13 +245,31 @@ func TestNewVerifyCmd(t *testing.T) {
 			name: "Prints output in JSON format",
 			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore --format json", artifactPath, bundlePath),
 			wants: Options{
-				ArtifactPath:    artifactPath,
-				BundlePath:      bundlePath,
-				DigestAlgorithm: "sha256",
-				Limit:           30,
-				OIDCIssuer:      GitHubOIDCIssuer,
-				Owner:           "sigstore",
-				SANRegex:        "^https://github.com/sigstore/",
+				ArtifactPath:     artifactPath,
+				BundlePath:       bundlePath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    verification.SLSAPredicateV1,
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
+			},
+			wantsExporter: true,
+		},
+		{
+			name: "Use specified predicate type",
+			cli:  fmt.Sprintf("%s --bundle %s --owner sigstore --predicate-type https://spdx.dev/Document/v2.3 --format json", artifactPath, bundlePath),
+			wants: Options{
+				ArtifactPath:     artifactPath,
+				BundlePath:       bundlePath,
+				DigestAlgorithm:  "sha256",
+				Hostname:         "github.com",
+				Limit:            30,
+				OIDCIssuer:       verification.GitHubOIDCIssuer,
+				Owner:            "sigstore",
+				PredicateType:    "https://spdx.dev/Document/v2.3",
+				SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 			},
 			wantsExporter: true,
 		},
@@ -212,16 +297,18 @@ func TestNewVerifyCmd(t *testing.T) {
 
 			assert.Equal(t, tc.wants.ArtifactPath, opts.ArtifactPath)
 			assert.Equal(t, tc.wants.BundlePath, opts.BundlePath)
-			assert.Equal(t, tc.wants.CustomTrustedRoot, opts.CustomTrustedRoot)
 			assert.Equal(t, tc.wants.DenySelfHostedRunner, opts.DenySelfHostedRunner)
 			assert.Equal(t, tc.wants.DigestAlgorithm, opts.DigestAlgorithm)
+			assert.Equal(t, tc.wants.Hostname, opts.Hostname)
 			assert.Equal(t, tc.wants.Limit, opts.Limit)
 			assert.Equal(t, tc.wants.NoPublicGood, opts.NoPublicGood)
 			assert.Equal(t, tc.wants.OIDCIssuer, opts.OIDCIssuer)
 			assert.Equal(t, tc.wants.Owner, opts.Owner)
+			assert.Equal(t, tc.wants.PredicateType, opts.PredicateType)
 			assert.Equal(t, tc.wants.Repo, opts.Repo)
 			assert.Equal(t, tc.wants.SAN, opts.SAN)
 			assert.Equal(t, tc.wants.SANRegex, opts.SANRegex)
+			assert.Equal(t, tc.wants.TrustedRoot, opts.TrustedRoot)
 			assert.NotNil(t, opts.APIClient)
 			assert.NotNil(t, opts.Logger)
 			assert.NotNil(t, opts.OCIClient)
@@ -230,21 +317,53 @@ func TestNewVerifyCmd(t *testing.T) {
 	}
 }
 
+func TestVerifyCmdAuthChecks(t *testing.T) {
+	f := &cmdutil.Factory{}
+
+	t.Run("by default auth check is required", func(t *testing.T) {
+		cmd := NewVerifyCmd(f, func(o *Options) error {
+			return nil
+		})
+
+		// IsAuthCheckEnabled assumes commands under test are subcommands
+		parent := &cobra.Command{Use: "root"}
+		parent.AddCommand(cmd)
+
+		require.NoError(t, cmd.ParseFlags([]string{}))
+		require.True(t, cmdutil.IsAuthCheckEnabled(cmd), "expected auth check to be required")
+	})
+
+	t.Run("when --bundle flag is provided, auth check is not required", func(t *testing.T) {
+		cmd := NewVerifyCmd(f, func(o *Options) error {
+			return nil
+		})
+
+		// IsAuthCheckEnabled assumes commands under test are subcommands
+		parent := &cobra.Command{Use: "root"}
+		parent.AddCommand(cmd)
+
+		require.NoError(t, cmd.ParseFlags([]string{"--bundle", "not-important"}))
+		require.False(t, cmdutil.IsAuthCheckEnabled(cmd), "expected auth check not to be required due to --bundle flag")
+	})
+}
+
 func TestJSONOutput(t *testing.T) {
 	testIO, _, out, _ := iostreams.Test()
 	opts := Options{
-		ArtifactPath:    artifactPath,
-		BundlePath:      bundlePath,
-		DigestAlgorithm: "sha512",
-		APIClient:       api.NewTestClient(),
-		Logger:          io.NewHandler(testIO),
-		OCIClient:       oci.MockClient{},
-		OIDCIssuer:      GitHubOIDCIssuer,
-		Owner:           "sigstore",
-		SANRegex:        "^https://github.com/sigstore/",
-		exporter:        cmdutil.NewJSONExporter(),
+		ArtifactPath:     artifactPath,
+		BundlePath:       bundlePath,
+		DigestAlgorithm:  "sha512",
+		APIClient:        api.NewTestClient(),
+		Logger:           io.NewHandler(testIO),
+		OCIClient:        oci.MockClient{},
+		OIDCIssuer:       verification.GitHubOIDCIssuer,
+		Owner:            "sigstore",
+		PredicateType:    verification.SLSAPredicateV1,
+		SANRegex:         "^https://github.com/sigstore/",
+		SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
+		exporter:         cmdutil.NewJSONExporter(),
 	}
-	require.Nil(t, runVerify(&opts))
+	require.NoError(t, runVerify(&opts))
 
 	var target []*verification.AttestationProcessingResult
 	err := json.Unmarshal(out.Bytes(), &target)
@@ -255,19 +374,21 @@ func TestRunVerify(t *testing.T) {
 	logger := io.NewTestHandler()
 
 	publicGoodOpts := Options{
-		ArtifactPath:    artifactPath,
-		BundlePath:      bundlePath,
-		DigestAlgorithm: "sha512",
-		APIClient:       api.NewTestClient(),
-		Logger:          logger,
-		OCIClient:       oci.MockClient{},
-		OIDCIssuer:      GitHubOIDCIssuer,
-		Owner:           "sigstore",
-		SANRegex:        "^https://github.com/sigstore/",
+		ArtifactPath:     artifactPath,
+		BundlePath:       bundlePath,
+		DigestAlgorithm:  "sha512",
+		APIClient:        api.NewTestClient(),
+		Logger:           logger,
+		OCIClient:        oci.MockClient{},
+		OIDCIssuer:       verification.GitHubOIDCIssuer,
+		Owner:            "sigstore",
+		PredicateType:    verification.SLSAPredicateV1,
+		SANRegex:         "^https://github.com/sigstore/",
+		SigstoreVerifier: verification.NewMockSigstoreVerifier(t),
 	}
 
 	t.Run("with valid artifact and bundle", func(t *testing.T) {
-		require.Nil(t, runVerify(&publicGoodOpts))
+		require.NoError(t, runVerify(&publicGoodOpts))
 	})
 
 	t.Run("with failing OCI artifact fetch", func(t *testing.T) {
@@ -277,7 +398,7 @@ func TestRunVerify(t *testing.T) {
 
 		err := runVerify(&opts)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "failed to digest artifact")
+		require.ErrorContains(t, err, "failed to parse reference")
 	})
 
 	t.Run("with missing artifact path", func(t *testing.T) {
@@ -297,15 +418,44 @@ func TestRunVerify(t *testing.T) {
 		opts.BundlePath = ""
 		opts.Owner = "sigstore"
 
-		require.Nil(t, runVerify(&opts))
+		require.NoError(t, runVerify(&opts))
+	})
+
+	t.Run("with owner which not matches SourceRepositoryOwnerURI", func(t *testing.T) {
+		opts := publicGoodOpts
+		opts.BundlePath = ""
+		opts.Owner = "owner"
+
+		err := runVerify(&opts)
+		require.ErrorContains(t, err, "expected SourceRepositoryOwnerURI to be https://github.com/owner, got https://github.com/sigstore")
 	})
 
 	t.Run("with repo", func(t *testing.T) {
 		opts := publicGoodOpts
 		opts.BundlePath = ""
-		opts.Repo = "github/example"
+		opts.Repo = "sigstore/sigstore-js"
 
 		require.Nil(t, runVerify(&opts))
+	})
+
+	// Test with bad tenancy
+	t.Run("with bad tenancy", func(t *testing.T) {
+		opts := publicGoodOpts
+		opts.BundlePath = ""
+		opts.Repo = "sigstore/sigstore-js"
+		opts.Tenant = "foo"
+
+		err := runVerify(&opts)
+		require.ErrorContains(t, err, "expected SourceRepositoryOwnerURI to be https://foo.ghe.com/sigstore, got https://github.com/sigstore")
+	})
+
+	t.Run("with repo which not matches SourceRepositoryURI", func(t *testing.T) {
+		opts := publicGoodOpts
+		opts.BundlePath = ""
+		opts.Repo = "sigstore/wrong"
+
+		err := runVerify(&opts)
+		require.ErrorContains(t, err, "expected SourceRepositoryURI to be https://github.com/sigstore/wrong, got https://github.com/sigstore/sigstore-js")
 	})
 
 	t.Run("with invalid repo", func(t *testing.T) {
@@ -316,7 +466,7 @@ func TestRunVerify(t *testing.T) {
 
 		err := runVerify(&opts)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "failed to fetch attestations for subject")
+		require.ErrorContains(t, err, "failed to fetch attestations from wrong/example")
 	})
 
 	t.Run("with invalid owner", func(t *testing.T) {
@@ -327,52 +477,7 @@ func TestRunVerify(t *testing.T) {
 
 		err := runVerify(&opts)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "failed to fetch attestations for subject")
-	})
-
-	t.Run("with invalid OIDC issuer", func(t *testing.T) {
-		opts := publicGoodOpts
-		opts.OIDCIssuer = "not-a-real-issuer"
-		require.Error(t, runVerify(&opts))
-	})
-
-	t.Run("with SAN enforcement", func(t *testing.T) {
-		opts := Options{
-			ArtifactPath:    artifactPath,
-			BundlePath:      bundlePath,
-			APIClient:       api.NewTestClient(),
-			DigestAlgorithm: "sha512",
-			Logger:          logger,
-			OIDCIssuer:      GitHubOIDCIssuer,
-			Owner:           "sigstore",
-			SAN:             SigstoreSanValue,
-		}
-		require.Nil(t, runVerify(&opts))
-	})
-
-	t.Run("with invalid SAN", func(t *testing.T) {
-		opts := publicGoodOpts
-		opts.SAN = "fake san"
-		require.Error(t, runVerify(&opts))
-	})
-
-	t.Run("with SAN regex enforcement", func(t *testing.T) {
-		opts := publicGoodOpts
-		opts.SANRegex = SigstoreSanRegex
-		require.Nil(t, runVerify(&opts))
-	})
-
-	t.Run("with invalid SAN regex", func(t *testing.T) {
-		opts := publicGoodOpts
-		opts.SANRegex = "^https://github.com/sigstore/not-real/"
-		require.Error(t, runVerify(&opts))
-	})
-
-	t.Run("with no matching OIDC issuer", func(t *testing.T) {
-		opts := publicGoodOpts
-		opts.OIDCIssuer = "some-other-issuer"
-
-		require.Error(t, runVerify(&opts))
+		require.ErrorContains(t, err, "failed to fetch attestations from wrong-owner")
 	})
 
 	t.Run("with missing API client", func(t *testing.T) {
@@ -381,21 +486,53 @@ func TestRunVerify(t *testing.T) {
 		customOpts.BundlePath = ""
 		require.Error(t, runVerify(&customOpts))
 	})
-}
 
-func TestVerifySLSAPredicateType_InvalidPredicate(t *testing.T) {
-	statement := &in_toto.Statement{}
-	statement.PredicateType = "some-other-predicate-type"
+	t.Run("with valid OCI artifact", func(t *testing.T) {
+		customOpts := publicGoodOpts
+		customOpts.ArtifactPath = "oci://ghcr.io/github/test"
+		customOpts.BundlePath = ""
 
-	apr := []*verification.AttestationProcessingResult{
-		{
-			VerificationResult: &verify.VerificationResult{
-				Statement: statement,
-			},
-		},
-	}
+		require.Nil(t, runVerify(&customOpts))
+	})
 
-	err := verifySLSAPredicateType(io.NewTestHandler(), apr)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNoMatchingSLSAPredicate)
+	t.Run("with valid OCI artifact with UseBundleFromRegistry flag", func(t *testing.T) {
+		customOpts := publicGoodOpts
+		customOpts.ArtifactPath = "oci://ghcr.io/github/test"
+		customOpts.BundlePath = ""
+		customOpts.UseBundleFromRegistry = true
+
+		require.Nil(t, runVerify(&customOpts))
+	})
+
+	t.Run("with valid OCI artifact with UseBundleFromRegistry flag and unknown predicate type", func(t *testing.T) {
+		customOpts := publicGoodOpts
+		customOpts.ArtifactPath = "oci://ghcr.io/github/test"
+		customOpts.BundlePath = ""
+		customOpts.UseBundleFromRegistry = true
+		customOpts.PredicateType = "https://predicate.type"
+
+		err := runVerify(&customOpts)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "no attestations found with predicate type")
+	})
+
+	t.Run("with valid OCI artifact with UseBundleFromRegistry flag but no bundle return from registry", func(t *testing.T) {
+		customOpts := publicGoodOpts
+		customOpts.ArtifactPath = "oci://ghcr.io/github/test"
+		customOpts.BundlePath = ""
+		customOpts.UseBundleFromRegistry = true
+		customOpts.OCIClient = oci.NoAttestationsClient{}
+
+		require.ErrorContains(t, runVerify(&customOpts), "no attestations found in the OCI registry. Retry the command without the --bundle-from-oci flag to check GitHub for the attestation")
+	})
+
+	t.Run("with valid OCI artifact with UseBundleFromRegistry flag but fail on fetching bundle from registry", func(t *testing.T) {
+		customOpts := publicGoodOpts
+		customOpts.ArtifactPath = "oci://ghcr.io/github/test"
+		customOpts.BundlePath = ""
+		customOpts.UseBundleFromRegistry = true
+		customOpts.OCIClient = oci.NoAttestationsClient{}
+
+		require.ErrorContains(t, runVerify(&customOpts), "no attestations found in the OCI registry. Retry the command without the --bundle-from-oci flag to check GitHub for the attestation")
+	})
 }
