@@ -1,105 +1,229 @@
-# GitHub CLI
+## Mission
 
-`gh` is GitHub on the command line. It brings pull requests, issues, and other GitHub concepts to the terminal next to where you are already working with `git` and your code.
+This repository powers the Pickup Haul / AutoBais LLC website for pickup-truck
+hauling, delivery, junk removal, moving help, and assembly/install services in
+Southern California.
 
-![screenshot of gh pr status](https://user-images.githubusercontent.com/98482/84171218-327e7a80-aa40-11ea-8cd1-5177fc2d0e72.png)
+Treat it as a production business system. Prioritize:
 
-GitHub CLI is supported for users on GitHub.com, GitHub Enterprise Cloud, and GitHub Enterprise Server 2.20+ with support for macOS, Windows, and Linux.
+1. clear customer flows;
+2. trustworthy public copy;
+3. reliable booking and payment behavior;
+4. privacy and security;
+5. minimal disruption to existing working functionality.
 
-## Documentation
+## Operating Style
 
-For [installation options see below](#installation), for usage instructions [see the manual](https://cli.github.com/manual/).
+Work like a senior engineer who already understands the project context.
 
-## Contributing
+- Inspect the repository before making changes.
+- Prefer completing clear tasks without unnecessary clarification.
+- Ask one targeted question only when a missing decision could materially change
+  the implementation, public behavior, security, pricing, or legal meaning.
+- Make reasonable, conservative assumptions for minor implementation details.
+- Preserve existing architecture, naming, style, and user work.
+- Prefer focused, reviewable changes over broad rewrites.
+- Explain important assumptions and report verification honestly.
+- Never claim that a feature works unless it was verified at the relevant level.
 
-If anything feels off or if you feel that some functionality is missing, please check out the [contributing page](.github/CONTRIBUTING.md). There you will find instructions for sharing your feedback, building the tool locally, and submitting pull requests to the project.
+## Standard Workflow
 
-If you are a hubber and are interested in shipping new commands for the CLI, check out our [doc on internal contributions](docs/working-with-us.md)
+For every task:
 
-<!-- this anchor is linked to from elsewhere, so avoid renaming it -->
-## Installation
+1. Read the request and identify the affected user flow.
+2. Search the codebase before creating components, hooks, utilities, routes,
+   migrations, or API handlers.
+3. Inspect related files and existing patterns.
+4. Make the smallest coherent change that fully solves the task.
+5. Check edge cases, loading states, error states, and sensitive-data handling.
+6. Run the narrowest verification that proves the change.
+7. Run the full verification set when the change affects shared or production
+   behavior.
+8. Summarize what changed, what was verified, and what could not be verified.
 
-### [macOS](docs/install_macos.md)
+Do not stop at a partial implementation when the remaining work is clear and
+safe to complete.
 
-- [Homebrew](docs/install_macos.md#homebrew)
-- [Precompiled binaries](docs/install_macos.md#precompiled-binaries) on [releases page][]
+## Project Map
 
-For additional macOS packages and installers, see [community-supported docs](docs/install_macos.md#community-unofficial)
+- `src/` contains the React 18 + Vite + TypeScript frontend.
+- `src/components/ui/` contains shadcn/Radix primitives. Keep app-specific
+  business UI outside that folder when practical.
+- `src/pages/` contains route-level screens, including admin, payment, tracking,
+  quote, auth, and service pages.
+- `src/integrations/` contains Lovable/Supabase client code.
+- `supabase/functions/` contains Edge Functions for booking, payments, maps,
+  email, Telegram, and AI widget flows.
+- `supabase/migrations/` contains database schema changes.
+- `docs/security/` and `README.md` document credential rotation and secret
+  scanning.
 
-### [Linux & Unix](docs/install_linux.md)
+## Editing Principles
 
-- [Debian, Raspberry Pi, Ubuntu](docs/install_linux.md#debian)
-- [Amazon Linux, CentOS, Fedora, openSUSE, RHEL, SUSE](docs/install_linux.md#rpm)
-- [Precompiled binaries](docs/install_linux.md#precompiled-binaries) on [releases page][]
+Prefer:
 
-For additional Linux & Unix packages and installers, see [community-supported docs](docs/install_linux.md#community-unofficial)
+- extending existing components and utilities;
+- composition over duplication;
+- simple, strongly typed implementations;
+- established repository patterns;
+- readable code over unnecessary abstraction;
+- backward-compatible changes unless a breaking change is explicitly requested.
 
-### [Windows](docs/install_windows.md)
+Avoid:
 
-- [WinGet](docs/install_windows.md#winget)
-- [Precompiled binaries](docs/install_windows.md#precompiled-binaries) on [releases page][]
+- replacing the Lovable/Vite scaffold;
+- unrelated refactors;
+- duplicate components, utilities, routes, or data models;
+- premature abstractions;
+- introducing new dependencies when existing tools are sufficient;
+- broad formatting changes unrelated to the task.
 
-For additional Windows packages and installers, see [community-supported docs](docs/install_windows.md#community-unofficial)
+Do not add a production dependency unless it is clearly necessary. When a new
+dependency is avoidable, use the existing stack.
 
-### Build from source
+## React and TypeScript
 
-See here on how to [build GitHub CLI from source](docs/install_source.md).
+- Use functional React components.
+- Keep components focused and separate business logic from presentation where
+  practical.
+- Extract reusable stateful logic into hooks when it improves clarity.
+- Preserve strict TypeScript typing.
+- Avoid `any`; use explicit types, generics, or `unknown` with validation.
+- Reuse existing UI primitives before creating new ones.
+- Preserve responsive behavior and mobile usability.
+- Include appropriate loading, empty, error, and disabled states.
+- Avoid unnecessary rerenders, duplicated state, and oversized client-side
+  dependencies.
 
-### GitHub Codespaces
+## Supabase and Edge Functions
 
-To add GitHub CLI to your codespace, add the following to your [devcontainer file](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-features-to-a-devcontainer-file):
+- Prefer migrations over manual database changes.
+- Never edit generated types manually.
+- Keep Edge Functions small, explicit, and fail-safe.
+- Validate external input at function boundaries.
+- Preserve backward compatibility unless explicitly requested otherwise.
+- Do not assume a local frontend proves a deployed function or remote integration
+  works.
+- Verify the real frontend-to-API-to-function path when credentials and access
+  are available.
+- Treat database policies, authentication, service-role usage, and public
+  endpoints as security-sensitive.
 
-```json
-"features": {
-  "ghcr.io/devcontainers/features/github-cli:1": {}
-}
-```
+## Security and Privacy
 
-### GitHub Actions
+- Never print, commit, expose, or move secrets from `.env`, Supabase, Lovable,
+  Stripe, Telegram, Mapbox, GitHub, or deployment platforms.
+- Treat bookings, customers, driver tracking, payments, admin/CRM data, Telegram
+  notifications, and AI chat logs as sensitive.
+- Do not add PII to analytics, logs, test fixtures, screenshots, examples, or
+  public files.
+- Use synthetic data for tests and examples.
+- Preserve authorization checks.
+- Do not weaken RLS, authentication, input validation, rate limits, or secret
+  handling to make a feature easier to implement.
+- Report suspected secret exposure or unsafe configuration immediately without
+  reproducing the secret value.
 
-[GitHub-hosted runners](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners) have the GitHub CLI pre-installed, which is updated weekly.
+## Public Content and Business Trust
 
-If a specific version is needed, your GitHub Actions workflow will need to install it based on the [macOS](#macos), [Linux & Unix](#linux--unix), or [Windows](#windows) instructions above.
+- Keep public business copy practical, credible, and easy to understand.
+- Do not invent testimonials, certifications, insurance claims, pricing,
+  guarantees, service coverage, or legal promises.
+- Use `deposit` and `down payment` wording carefully so customer expectations are
+  clear.
+- Confirm with the user before publishing personal photos, work photos, private
+  customer details, or any public-facing claim that could affect trust, pricing,
+  insurance, or legal responsibility.
+- Preserve consistent business naming, contact details, and service-area
+  information across the site.
 
-For information on all pre-installed tools, see [`actions/runner-images`](https://github.com/actions/runner-images)
+## Production-Critical Flows
 
-### Verification of binaries
+Treat these areas as high risk:
 
-Since version 2.50.0, `gh` has been producing [Build Provenance Attestation](https://github.blog/changelog/2024-06-25-artifact-attestations-is-generally-available/), enabling a cryptographically verifiable paper-trail back to the origin GitHub repository, git revision, and build instructions used. The build provenance attestations are signed and rely on Public Good [Sigstore](https://www.sigstore.dev/) for PKI.
+- booking and quote submission;
+- payments, deposits, refunds, and Stripe flows;
+- authentication and authorization;
+- driver tracking;
+- admin and CRM features;
+- customer notifications;
+- pricing and public claims;
+- database migrations and RLS;
+- Supabase Edge Functions;
+- Telegram, email, maps, and AI integrations.
 
-There are two common ways to verify a downloaded release, depending on whether `gh` is already installed or not. If `gh` is installed, it's trivial to verify a new release:
+For changes in these areas, verify the complete affected workflow rather than
+only the edited file.
 
-- **Option 1: Using `gh` if already installed:**
+Do not perform destructive production actions, rotate credentials, deploy schema
+changes, publish content, or modify live payment behavior unless the task
+explicitly requires it and the necessary access is available.
 
-  ```shell
-  $ gh at verify -R cli/cli gh_2.62.0_macOS_arm64.zip
-  Loaded digest sha256:fdb77f31b8a6dd23c3fd858758d692a45f7fc76383e37d475bdcae038df92afc for file://gh_2.62.0_macOS_arm64.zip
-  Loaded 1 attestation from GitHub API
-  ✓ Verification succeeded!
+## Accessibility, SEO, and UX
 
-  sha256:fdb77f31b8a6dd23c3fd858758d692a45f7fc76383e37d475bdcae038df92afc was attested by:
-  REPO     PREDICATE_TYPE                  WORKFLOW
-  cli/cli  https://slsa.dev/provenance/v1  .github/workflows/deployment.yml@refs/heads/trunk
-  ```
+For public-facing changes:
 
-- **Option 2: Using Sigstore [`cosign`](https://github.com/sigstore/cosign):**
+- preserve semantic HTML and keyboard navigation;
+- keep labels and controls accessible;
+- maintain sensible heading structure;
+- preserve metadata, canonical behavior, and route discoverability;
+- avoid layout shifts and unnecessarily large assets;
+- keep forms clear and error messages actionable;
+- verify important flows on mobile-sized layouts.
 
-  To perform this, download the [attestation](https://github.com/cli/cli/attestations) for the downloaded release and use cosign to verify the authenticity of the downloaded release:
+## Working Tree Safety
 
-  ```shell
-  $ cosign verify-blob-attestation --bundle cli-cli-attestation-3120304.sigstore.json \
-        --new-bundle-format \
-        --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-        --certificate-identity="https://github.com/cli/cli/.github/workflows/deployment.yml@refs/heads/trunk" \
-        gh_2.62.0_macOS_arm64.zip
-  Verified OK
-  ```
+- Preserve unrelated local changes.
+- This repository may contain untracked installers, exports, generated files, or
+  local artifacts.
+- Do not delete, move, reset, clean, or overwrite unrelated files unless asked.
+- Do not use destructive Git commands such as `git reset --hard`,
+  `git clean -fd`, or forced checkout to discard user work.
+- Review the current diff before and after editing when Git is available.
 
-## Comparison with hub
+## Commands
 
-For many years, [hub](https://github.com/github/hub) was the unofficial GitHub CLI tool. `gh` is a new project that helps us explore
-what an official GitHub CLI tool can look like with a fundamentally different design. While both
-tools bring GitHub to the terminal, `hub` behaves as a proxy to `git`, and `gh` is a standalone
-tool. Check out our [more detailed explanation](docs/gh-vs-hub.md) to learn more.
+- `npm run dev` starts the Vite dev server.
+- `npm run build` creates the production build.
+- `npm run lint` runs ESLint.
+- `npm run test` runs Vitest once.
+- `npm run test:watch` starts Vitest watch mode.
+- `npm run preview` serves the production build locally.
+- `npm run secrets:verify` runs post-rotation smoke checks when the required
+  secrets and admin token are available.
+- `gitleaks detect --config .gitleaks.toml --no-banner` checks for leaked
+  secrets.
 
-[releases page]: https://github.com/cli/cli/releases/latest
+## Verification
+
+Use `npm run lint`, `npm run test`, and `npm run build` as the normal local
+verification set for code changes.
+
+Use narrower checks only when:
+
+- the change is clearly isolated;
+- the full command is unavailable;
+- dependencies are missing;
+- required credentials or remote access are unavailable.
+
+Always report skipped verification and the reason.
+
+Suggested minimums:
+
+- documentation-only changes: inspect formatting and links;
+- isolated UI changes: lint plus relevant tests when present;
+- shared frontend logic: lint, tests, and build;
+- booking, payment, auth, admin, or tracking changes: lint, tests, build, and
+  workflow-level verification where access permits;
+- migrations and Edge Functions: validate syntax, affected contracts, security,
+  and integration paths.
+
+A successful local dev server is not proof that deployed services work.
+
+## Tooling
+
+- Prefer `rg` for repository search.
+- Prefer `apply_patch` for focused manual edits.
+- Read nearby code before introducing new patterns.
+- Check existing dependencies before adding libraries.
+- Use repository-provided scripts instead of inventing parallel tooling.
