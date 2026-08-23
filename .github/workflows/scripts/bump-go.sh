@@ -84,7 +84,7 @@ echo "  • set toolchain    → go$TOOLCHAIN_VERSION"
 # Let go mod tidy reconcile dependencies and normalize directives.
 echo "  • running go mod tidy..."
 pushd "$MODULE_DIR" > /dev/null
-go mod tidy
+GOTOOLCHAIN=auto go mod tidy
 popd > /dev/null
 
 # ---- Check if anything actually changed -------------------------------------
