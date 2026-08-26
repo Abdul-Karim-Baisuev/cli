@@ -82,9 +82,11 @@ echo "  • set go directive → $GO_DIRECTIVE_VERSION"
 echo "  • set toolchain    → go$TOOLCHAIN_VERSION"
 
 # Let go mod tidy reconcile dependencies and normalize directives.
+# GOTOOLCHAIN=auto allows the go command to download and switch to the
+# newly required toolchain version rather than failing with GOTOOLCHAIN=local.
 echo "  • running go mod tidy..."
 pushd "$MODULE_DIR" > /dev/null
-go mod tidy
+GOTOOLCHAIN=auto go mod tidy
 popd > /dev/null
 
 # ---- Check if anything actually changed -------------------------------------
