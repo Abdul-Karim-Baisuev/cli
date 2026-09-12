@@ -122,7 +122,7 @@ fi
 if [[ $APPLY -eq 0 ]]; then
   echo -e "\n=== DRY-RUN DIFF (commit $COMMIT_HASH):\n"
   git --no-pager show --color "$COMMIT_HASH"
-  echo -e "\nIf --apply were provided, script would continue with:\n  git push -u origin $BRANCH\n  gh pr create --title \"$PR_TITLE\" --body <body>\n"
+  echo -e "\nIf --apply were provided, script would continue with:\n  git push --force -u origin $BRANCH\n  gh pr create --title \"$PR_TITLE\" --body <body>\n"
   exit 0
 fi
 
@@ -146,7 +146,10 @@ $TC_LINE
 EOF
 )
 
-git push -u origin "$BRANCH"
+# Force-push: this branch is exclusively owned/managed by this automation and
+# recreated fresh from trunk on every run, so a stale remote branch left over
+# from an earlier (e.g. closed/merged) run must not block the push.
+git push --force -u origin "$BRANCH"
 
 gh pr create --title "$PR_TITLE" --body "$PR_BODY" --fill
 
